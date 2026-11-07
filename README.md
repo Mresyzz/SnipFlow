@@ -11,12 +11,12 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/your-username/SnipFlow/releases"><img src="https://img.shields.io/github/v/release/your-username/SnipFlow?style=flat-square&color=00f2fe&label=Release" alt="Latest Release" /></a>
+  <a href="https://github.com/Mresyzz/SnipFlow/releases"><img src="https://img.shields.io/github/v/release/Mresyzz/SnipFlow?style=flat-square&color=00f2fe&label=Release" alt="Latest Release" /></a>
   <a href="https://crates.io/crates/snipflow"><img src="https://img.shields.io/crates/v/snipflow?style=flat-square&color=ff8008&label=Cargo" alt="Crates.io" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=flat-square" alt="License: GPL-3.0" /></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.78+-orange.svg?style=flat-square&logo=rust" alt="Rust Version" /></a>
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=flat-square" alt="Platform Support" />
-  <a href="https://github.com/your-username/SnipFlow/stargazers"><img src="https://img.shields.io/github/stars/your-username/SnipFlow?style=flat-square&color=gold" alt="GitHub Stars" /></a>
+  <a href="https://github.com/Mresyzz/SnipFlow/stargazers"><img src="https://img.shields.io/github/stars/Mresyzz/SnipFlow?style=flat-square&color=gold" alt="GitHub Stars" /></a>
 </p>
 
 ---
@@ -74,7 +74,7 @@ Your media assets never leave local storage. SnipFlow operates completely offlin
 
 ### Pre-built Binaries
 
-Download pre-compiled, statically-linked standalone executables from the [Releases](https://github.com/your-username/SnipFlow/releases) page:
+Download pre-compiled, statically-linked standalone executables from the [Releases](https://github.com/Mresyzz/SnipFlow/releases) page:
 
 - **Windows**: `snipflow-windows-x86_64.zip` (Portable `.exe` included)
 - **macOS**: `snipflow-macos-universal.dmg` (Apple Silicon & Intel)
@@ -92,7 +92,7 @@ cargo install snipflow
 
 ```bash
 # Clone repository
-git clone https://github.com/your-username/SnipFlow.git
+git clone https://github.com/Mresyzz/SnipFlow.git
 cd SnipFlow
 
 # Build release target with native optimizations
