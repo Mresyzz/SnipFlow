@@ -25,9 +25,6 @@
   <img src="assets/demo.gif" alt="SnipFlow Demo" width="92%" />
 </p>
 
-<p align="center">
-  <em>Drop an hour-long raw OBS recording. Drag the threshold slider to strip all dead air. Hit <code>Ctrl + E</code> to export clean cuts in under 100 milliseconds without losing a single bit of visual fidelity.</em>
-</p>
 
 ---
 
