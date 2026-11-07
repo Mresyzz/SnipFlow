@@ -1,0 +1,19 @@
+# Rust Cargo build artifacts
+target/
+**/*.rs.bk
+*.pdb
+
+# Operating System Files
+.DS_Store
+Thumbs.db
+
+# Output media from tests
+output*.mp4
+*.cut.mp4
+cuts/
+
+# IDE / Editor configuration
+.idea/
+.vscode/
+*.swp
+*.swo

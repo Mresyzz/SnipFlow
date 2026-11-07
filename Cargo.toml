@@ -1,0 +1,37 @@
+[package]
+name = "snipflow"
+version = "0.1.0"
+edition = "2021"
+authors = ["SnipFlow Contributors"]
+description = "Ultra-fast, local-first lossless video clipper & silence stripper powered by Rust and FFmpeg."
+license = "GPL-3.0-or-later"
+readme = "README.md"
+keywords = ["video", "ffmpeg", "lossless-cut", "silence-detect", "keyframes"]
+categories = ["multimedia::video", "command-line-utilities"]
+
+[lib]
+name = "snipflow"
+path = "src/lib.rs"
+
+[[bin]]
+name = "snipflow"
+path = "src/main.rs"
+
+[dependencies]
+# Error handling
+thiserror = "1.0"
+
+# Regular expressions for parsing FFmpeg/FFprobe output
+regex = "1.10"
+
+# Optional environment logger for tracing execution details
+env_logger = { version = "0.11", default-features = false }
+log = "0.4"
+
+[profile.release]
+opt-level = 3
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true
+
