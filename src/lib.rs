@@ -10,4 +10,5 @@ pub use core::ffmpeg::{find_binary, get_audio_streams, get_duration, AudioStream
 pub use core::highlight::detect_peak_highlights;
 pub use core::keyframe::get_keyframes;
 pub use core::silence::{detect_silence, detect_silence_track};
+pub use core::waveform::generate_waveform_peaks;
 pub use error::{Result, SnipFlowError};

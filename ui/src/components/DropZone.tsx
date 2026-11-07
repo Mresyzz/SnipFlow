@@ -9,6 +9,22 @@ interface DropZoneProps {
 export const DropZone: React.FC<DropZoneProps> = ({ onFileSelected, isLoading }) => {
   const [isDragOver, setIsDragOver] = useState(false);
 
+  const handleClickZone = async (e: React.MouseEvent) => {
+    // If running in Tauri desktop environment, call native system file picker
+    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+      e.preventDefault();
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const selected = await invoke<string | null>("select_video_file_cmd");
+        if (selected) {
+          onFileSelected(selected);
+        }
+      } catch (err) {
+        console.error("Native file dialog failed:", err);
+      }
+    }
+  };
+
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragOver(true);
@@ -24,9 +40,7 @@ export const DropZone: React.FC<DropZoneProps> = ({ onFileSelected, isLoading })
 
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const file = e.dataTransfer.files[0];
-      // In webview / browser, create blob URL for instant preview playback
       const blobUrl = URL.createObjectURL(file);
-      // For Tauri, file path can often be obtained via webkitRelativePath or path attribute
       const filePath = (file as unknown as { path?: string }).path || file.name;
       onFileSelected(filePath, blobUrl);
     }
@@ -43,13 +57,14 @@ export const DropZone: React.FC<DropZoneProps> = ({ onFileSelected, isLoading })
 
   return (
     <div
+      onClick={handleClickZone}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`relative w-full h-full flex flex-col items-center justify-center border-2 border-dashed rounded-xl transition-all duration-200 ${
+      className={`relative w-full h-full flex flex-col items-center justify-center border-2 border-dashed rounded-xl transition-all duration-200 cursor-pointer ${
         isDragOver
           ? "border-cyan-400 bg-cyan-400/5"
-          : "border-dark-700 hover:border-dark-700/80 bg-dark-900/60"
+          : "border-dark-700 hover:border-cyan-500/50 bg-dark-900/60"
       }`}
     >
       <input
@@ -61,7 +76,7 @@ export const DropZone: React.FC<DropZoneProps> = ({ onFileSelected, isLoading })
       />
 
       {isLoading ? (
-        <div className="flex flex-col items-center gap-4 text-neutral-300">
+        <div className="flex flex-col items-center gap-4 text-neutral-300 pointer-events-none">
           <Loader2 className="w-12 h-12 text-cyan-400 animate-spin" />
           <div className="text-center">
             <p className="text-base font-medium">Extracting Keyframes & Analyzing Silence...</p>
@@ -69,7 +84,7 @@ export const DropZone: React.FC<DropZoneProps> = ({ onFileSelected, isLoading })
           </div>
         </div>
       ) : (
-        <div className="flex flex-col items-center gap-4 text-center px-6">
+        <div className="flex flex-col items-center gap-4 text-center px-6 pointer-events-none">
           <div className="w-16 h-16 rounded-2xl bg-dark-850 flex items-center justify-center border border-dark-800 shadow-lg">
             {isDragOver ? (
               <Film className="w-8 h-8 text-cyan-400 animate-pulse" />
@@ -85,8 +100,8 @@ export const DropZone: React.FC<DropZoneProps> = ({ onFileSelected, isLoading })
               Supports MP4, MKV, MOV, WebM (4K UHD 60fps & HDR)
             </p>
           </div>
-          <span className="inline-block text-xs uppercase tracking-wider px-3 py-1 bg-dark-800 text-neutral-400 rounded-md border border-dark-700 font-mono">
-            Or Click to Browse
+          <span className="inline-block text-xs uppercase tracking-wider px-3 py-1 bg-dark-800 text-cyan-400 rounded-md border border-dark-700 font-mono shadow-sm">
+            Or Click to Choose File (Native Dialog)
           </span>
         </div>
       )}

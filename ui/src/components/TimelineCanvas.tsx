@@ -9,6 +9,7 @@ interface TimelineCanvasProps {
   keyframes: number[];
   silenceIntervals: [number, number][];
   peakHighlights: number[];
+  waveformPeaks: number[];
   isMagneticSnapEnabled: boolean;
   zoomLevel: number;
   onSeek: (time: number) => void;
@@ -22,32 +23,64 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   keyframes,
   silenceIntervals,
   peakHighlights,
+  waveformPeaks,
   isMagneticSnapEnabled,
   zoomLevel,
   onSeek,
 }) => {
-  const containerRef = useRef<HTMLDivElement | null>(null);
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [hoverTime, setHoverTime] = useState<number | null>(null);
+  const [containerBaseWidth, setContainerBaseWidth] = useState<number>(1000);
+
+  // Measure base container width
+  useEffect(() => {
+    const updateSize = () => {
+      if (scrollContainerRef.current) {
+        setContainerBaseWidth(scrollContainerRef.current.clientWidth);
+      }
+    };
+    updateSize();
+    window.addEventListener("resize", updateSize);
+    return () => window.removeEventListener("resize", updateSize);
+  }, []);
+
+  const totalWidth = Math.max(containerBaseWidth, Math.round(containerBaseWidth * zoomLevel));
 
   const calculateTargetTime = useCallback(
     (clientX: number, rect: DOMRect) => {
       const offsetX = Math.max(0, Math.min(clientX - rect.left, rect.width));
-      const rawTime = (offsetX / rect.width) * duration;
-      return isMagneticSnapEnabled ? snapToKeyframe(rawTime, keyframes, 0.25 / zoomLevel) : rawTime;
+      const rawTime = (offsetX / rect.width) * (duration > 0 ? duration : 1);
+      return isMagneticSnapEnabled ? snapToKeyframe(rawTime, keyframes, 0.3 / zoomLevel) : rawTime;
     },
     [duration, isMagneticSnapEnabled, keyframes, zoomLevel]
   );
 
+  // Auto-scroll viewport to keep playhead visible when zoomed in
+  useEffect(() => {
+    if (zoomLevel > 1 && scrollContainerRef.current && duration > 0) {
+      const container = scrollContainerRef.current;
+      const playheadX = (currentTime / duration) * totalWidth;
+      const scrollLeft = container.scrollLeft;
+      const visibleWidth = container.clientWidth;
+
+      if (playheadX < scrollLeft + 40 || playheadX > scrollLeft + visibleWidth - 40) {
+        container.scrollTo({
+          left: Math.max(0, playheadX - visibleWidth / 2),
+          behavior: isDragging ? "auto" : "smooth",
+        });
+      }
+    }
+  }, [currentTime, zoomLevel, duration, totalWidth, isDragging]);
+
   useEffect(() => {
     const canvas = canvasRef.current;
-    const container = containerRef.current;
-    if (!canvas || !container) return;
+    if (!canvas) return;
 
     const dpr = window.devicePixelRatio || 1;
-    const width = container.clientWidth;
-    const height = 96;
+    const width = totalWidth;
+    const height = 104;
 
     canvas.width = width * dpr;
     canvas.height = height * dpr;
@@ -62,14 +95,14 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     const timeToX = (t: number) => (t / safeDuration) * width;
 
     // 1. Dark Base Background
-    ctx.fillStyle = "#12151e";
+    ctx.fillStyle = "#0e111a";
     ctx.fillRect(0, 0, width, height);
 
     // 2. Timeline Grid & Dynamic Time Labels
-    ctx.strokeStyle = "#1b202c";
+    ctx.strokeStyle = "#1a1f2c";
     ctx.lineWidth = 1;
     const baseInterval = duration > 600 ? 60 : duration > 60 ? 10 : 2;
-    const tickInterval = Math.max(0.5, baseInterval / zoomLevel);
+    const tickInterval = Math.max(0.2, baseInterval / zoomLevel);
 
     let lastLabelX = -100;
     for (let t = 0; t <= duration; t += tickInterval) {
@@ -79,58 +112,76 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       ctx.lineTo(x, height);
       ctx.stroke();
 
-      if (x - lastLabelX > 45) {
-        ctx.fillStyle = "#4a5568";
+      if (x - lastLabelX > 50) {
+        ctx.fillStyle = "#64748b";
         ctx.font = "10px monospace";
         ctx.fillText(`${t.toFixed(t % 1 !== 0 ? 1 : 0)}s`, x + 3, 14);
         lastLabelX = x;
       }
     }
 
-    // 3. Draw Silence Regions (Translucent warning strips)
-    ctx.fillStyle = "rgba(255, 8, 68, 0.22)";
+    // 3. Draw Audio RMS Waveform Peaks (Mirror visual bars)
+    if (waveformPeaks.length > 0) {
+      const barCount = waveformPeaks.length;
+      const barWidth = Math.max(1.5, width / barCount);
+      const centerY = 56;
+      const maxAmplitude = 26;
+
+      ctx.fillStyle = "rgba(6, 182, 212, 0.45)"; // Cyan waveform glow
+      for (let i = 0; i < barCount; i++) {
+        const peak = waveformPeaks[i];
+        const bx = (i / barCount) * width;
+        const barHeight = Math.max(2, peak * maxAmplitude);
+
+        // Render mirrored amplitude bar
+        ctx.fillRect(bx, centerY - barHeight / 2, Math.max(1, barWidth - 1), barHeight);
+      }
+    }
+
+    // 4. Draw Silence Regions (Translucent red warning alert blocks)
+    ctx.fillStyle = "rgba(239, 68, 68, 0.28)";
     for (const [start, end] of silenceIntervals) {
       const x0 = timeToX(start);
       const x1 = timeToX(end);
-      ctx.fillRect(x0, 18, Math.max(2, x1 - x0), height - 24);
+      ctx.fillRect(x0, 20, Math.max(2, x1 - x0), height - 28);
     }
 
-    // 4. Draw Peak Highlight Markers (Gold/Amber Neon Indicators)
+    // 5. Draw Peak Highlight Markers (Gold/Amber Neon Indicators)
     ctx.shadowColor = "#f59e0b";
     ctx.shadowBlur = 6;
     ctx.fillStyle = "#f59e0b";
     for (const peak of peakHighlights) {
       const x = timeToX(peak);
       ctx.beginPath();
-      ctx.arc(x, 54, 3, 0, Math.PI * 2);
+      ctx.arc(x, 78, 3, 0, Math.PI * 2);
       ctx.fill();
 
       // Flag needle
-      ctx.strokeStyle = "rgba(245, 158, 11, 0.5)";
+      ctx.strokeStyle = "rgba(245, 158, 11, 0.6)";
       ctx.lineWidth = 1;
       ctx.beginPath();
-      ctx.moveTo(x, 48);
-      ctx.lineTo(x, 62);
+      ctx.moveTo(x, 72);
+      ctx.lineTo(x, 86);
       ctx.stroke();
     }
     ctx.shadowBlur = 0;
 
-    // 5. Draw Keyframe (I-frame) Marks with High-Performance Pixel Decimation
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+    // 6. Draw Keyframe (I-frame) Marks with High-Performance Pixel Decimation
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.35)";
     ctx.lineWidth = 1;
     let lastKfPx = -10;
     for (const kf of keyframes) {
       const x = timeToX(kf);
-      if (Math.abs(x - lastKfPx) < 1.5) continue;
+      if (Math.abs(x - lastKfPx) < 1.2) continue;
       lastKfPx = x;
 
       ctx.beginPath();
-      ctx.moveTo(x, 18);
-      ctx.lineTo(x, 26);
+      ctx.moveTo(x, 20);
+      ctx.lineTo(x, 28);
       ctx.stroke();
     }
 
-    // 6. Draw In/Out Cut Selection with Inverted Coordinate Normalization
+    // 7. Draw In/Out Cut Selection with Inverted Coordinate Normalization
     if (inPoint !== null && outPoint !== null) {
       const rawInX = timeToX(inPoint);
       const rawOutX = timeToX(outPoint);
@@ -138,19 +189,19 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       const xOut = Math.max(rawInX, rawOutX);
       const selWidth = Math.max(2, xOut - xIn);
 
-      ctx.fillStyle = "rgba(0, 242, 254, 0.14)";
-      ctx.fillRect(xIn, 18, selWidth, height - 24);
+      ctx.fillStyle = "rgba(0, 242, 254, 0.16)";
+      ctx.fillRect(xIn, 20, selWidth, height - 28);
       ctx.strokeStyle = "#00f2fe";
       ctx.lineWidth = 1.5;
-      ctx.strokeRect(xIn, 18, selWidth, height - 24);
+      ctx.strokeRect(xIn, 20, selWidth, height - 28);
 
-      // Boundary grip indicators
+      // Boundary grip handles
       ctx.fillStyle = "#00f2fe";
-      ctx.fillRect(xIn - 2, 18, 4, height - 24);
-      ctx.fillRect(xOut - 2, 18, 4, height - 24);
+      ctx.fillRect(xIn - 2, 20, 4, height - 28);
+      ctx.fillRect(xOut - 2, 20, 4, height - 28);
     }
 
-    // 7. Draw Hover snap indicator
+    // 8. Draw Hover snap dashed indicator
     if (hoverTime !== null) {
       const hx = timeToX(hoverTime);
       ctx.strokeStyle = "rgba(0, 242, 254, 0.4)";
@@ -162,7 +213,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       ctx.setLineDash([]);
     }
 
-    // 8. Draw Active Playhead with Neon Cyan Glow
+    // 9. Draw Active Playhead with Neon Cyan Needle
     const px = timeToX(currentTime);
     ctx.shadowColor = "#00f2fe";
     ctx.shadowBlur = 8;
@@ -181,7 +232,19 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     ctx.closePath();
     ctx.fill();
     ctx.shadowBlur = 0;
-  }, [duration, currentTime, inPoint, outPoint, keyframes, silenceIntervals, peakHighlights, hoverTime, zoomLevel]);
+  }, [
+    duration,
+    currentTime,
+    inPoint,
+    outPoint,
+    keyframes,
+    silenceIntervals,
+    peakHighlights,
+    waveformPeaks,
+    hoverTime,
+    zoomLevel,
+    totalWidth,
+  ]);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     setIsDragging(true);
@@ -207,14 +270,17 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   };
 
   return (
-    <div ref={containerRef} className="w-full relative select-none">
+    <div
+      ref={scrollContainerRef}
+      className="w-full relative select-none overflow-x-auto overflow-y-hidden rounded-lg border border-dark-800 bg-dark-950/60 custom-scrollbar"
+    >
       <canvas
         ref={canvasRef}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerLeave={() => setHoverTime(null)}
-        className="w-full h-24 rounded-lg border border-dark-800 cursor-crosshair shadow-inner"
+        className="block cursor-crosshair shadow-inner"
       />
     </div>
   );

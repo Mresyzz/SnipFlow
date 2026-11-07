@@ -22,6 +22,7 @@ export interface MediaInspection {
   active_segments: [number, number][];
   audio_tracks: AudioStreamInfo[];
   peak_highlights: number[];
+  waveform_peaks: number[];
 }
 
 export interface CutResult {

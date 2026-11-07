@@ -1,11 +1,26 @@
 import React from "react";
-import { Magnet, Scissors, MicOff, Download, CheckCircle, Clock, ZoomIn, ZoomOut, Disc, Sparkles, Layers } from "lucide-react";
+import {
+  Magnet,
+  Scissors,
+  MicOff,
+  Download,
+  CheckCircle,
+  Clock,
+  ZoomIn,
+  ZoomOut,
+  Disc,
+  Sparkles,
+  Layers,
+  ShieldCheck,
+  ShieldAlert,
+} from "lucide-react";
 import { AudioStreamInfo } from "../types";
 
 interface ToolbarProps {
   inPoint: number | null;
   outPoint: number | null;
   currentTime: number;
+  keyframes: number[];
   isMagneticSnapEnabled: boolean;
   noiseDb: number;
   zoomLevel: number;
@@ -23,6 +38,7 @@ interface ToolbarProps {
   onZoomOut: () => void;
   onMarkIn: () => void;
   onMarkOut: () => void;
+  onSnapInToKeyframe: () => void;
   onStripSilence: () => void;
   onNextHighlight: () => void;
   onExport: () => void;
@@ -33,6 +49,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   inPoint,
   outPoint,
   currentTime,
+  keyframes,
   isMagneticSnapEnabled,
   noiseDb,
   zoomLevel,
@@ -50,6 +67,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onZoomOut,
   onMarkIn,
   onMarkOut,
+  onSnapInToKeyframe,
   onStripSilence,
   onNextHighlight,
   onExport,
@@ -57,6 +75,12 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 }) => {
   const selectionDuration =
     inPoint !== null && outPoint !== null ? Math.max(0, outPoint - inPoint) : null;
+
+  // Check if In-point matches an exact I-frame boundary (< 50ms)
+  const isKeyframeAligned =
+    inPoint !== null &&
+    keyframes.length > 0 &&
+    keyframes.some((kf) => Math.abs(kf - inPoint) < 0.05);
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-3 px-4 py-2.5 bg-dark-900 border border-dark-800 rounded-xl shadow-lg">
@@ -99,7 +123,36 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             </span>
           )}
 
-          <span className="text-[11px] font-mono text-neutral-500 ml-2">
+          {/* Keyframe GOP Alignment Badge */}
+          {inPoint !== null && keyframes.length > 0 && (
+            <button
+              onClick={onSnapInToKeyframe}
+              title={
+                isKeyframeAligned
+                  ? "Perfect I-Frame Cut: Zero freeze frames on playback"
+                  : "Unaligned GOP: Click to snap In-point to nearest Keyframe for 100% clean lossless cut"
+              }
+              className={`flex items-center gap-1 px-2 py-0.5 rounded text-[11px] font-mono border transition cursor-pointer ${
+                isKeyframeAligned
+                  ? "bg-green-500/10 border-green-500/30 text-green-400"
+                  : "bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20"
+              }`}
+            >
+              {isKeyframeAligned ? (
+                <>
+                  <ShieldCheck className="w-3 h-3 text-green-400" />
+                  <span>I-Frame Aligned</span>
+                </>
+              ) : (
+                <>
+                  <ShieldAlert className="w-3 h-3 text-amber-400" />
+                  <span>Snap to I-Frame</span>
+                </>
+              )}
+            </button>
+          )}
+
+          <span className="text-[11px] font-mono text-neutral-500 ml-1">
             Pos: {currentTime.toFixed(2)}s
           </span>
         </div>

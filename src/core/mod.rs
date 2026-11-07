@@ -3,3 +3,4 @@ pub mod ffmpeg;
 pub mod highlight;
 pub mod keyframe;
 pub mod silence;
+pub mod waveform;

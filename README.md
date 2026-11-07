@@ -73,7 +73,7 @@ Your media assets never leave local storage. SnipFlow operates completely offlin
 
 Download pre-compiled, statically-linked standalone executables from the [Releases](https://github.com/Mresyzz/SnipFlow/releases) page:
 
-- **Windows**: `snipflow-windows-x86_64.zip` (Portable `.exe` included)
+- **Windows**: `snipflow-v*-x86_64-pc-windows-msvc.zip` (Zero-configuration portable bundle with static `ffmpeg.exe` and `ffprobe.exe` included)
 - **macOS**: `snipflow-macos-universal.dmg` (Apple Silicon & Intel)
 - **Linux**: `snipflow-linux-x86_64.tar.gz` or `SnipFlow.AppImage`
 

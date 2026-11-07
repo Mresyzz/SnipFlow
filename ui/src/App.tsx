@@ -24,6 +24,7 @@ export const App: React.FC = () => {
   const [audioTracks, setAudioTracks] = useState<AudioStreamInfo[]>([]);
   const [selectedTrackIndex, setSelectedTrackIndex] = useState<number>(0);
   const [peakHighlights, setPeakHighlights] = useState<number[]>([]);
+  const [waveformPeaks, setWaveformPeaks] = useState<number[]>([]);
 
   const [inPoint, setInPoint] = useState<number | null>(null);
   const [outPoint, setOutPoint] = useState<number | null>(null);
@@ -52,74 +53,104 @@ export const App: React.FC = () => {
   }, []);
 
   // Load and inspect media file via Tauri IPC or Browser Fallback
-  const handleFileSelected = async (selectedPath: string, blobUrl?: string) => {
-    setFilePath(selectedPath);
-    setIsLoading(true);
-    setStatusMessage("Extracting keyframes, audio tracks & scanning dead-air...");
+  const handleFileSelected = useCallback(
+    async (selectedPath: string, blobUrl?: string) => {
+      setFilePath(selectedPath);
+      setIsLoading(true);
+      setStatusMessage("Extracting keyframes, audio tracks & scanning dead-air...");
 
-    try {
-      if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
-        const { invoke } = await import("@tauri-apps/api/core");
+      try {
+        if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+          const { invoke } = await import("@tauri-apps/api/core");
 
-        try {
-          const { convertFileSrc } = await import("@tauri-apps/api/core");
-          const assetUrl = convertFileSrc(selectedPath);
-          setVideoUrl(assetUrl);
-        } catch {
-          if (blobUrl) setVideoUrl(blobUrl);
-        }
+          try {
+            const { convertFileSrc } = await import("@tauri-apps/api/core");
+            const assetUrl = convertFileSrc(selectedPath);
+            setVideoUrl(assetUrl);
+          } catch {
+            if (blobUrl) setVideoUrl(blobUrl);
+          }
 
-        const res = await invoke<MediaInspection>("inspect_media_cmd", {
-          filePath: selectedPath,
-          noiseDb,
-          minSilenceDuration: 0.5,
-          trackIndex: selectedTrackIndex,
-        });
+          const res = await invoke<MediaInspection>("inspect_media_cmd", {
+            filePath: selectedPath,
+            noiseDb,
+            minSilenceDuration: 0.5,
+            trackIndex: selectedTrackIndex,
+          });
 
-        setDuration(res.duration);
-        setKeyframes(res.keyframes);
-        setSilenceIntervals(res.silence_intervals);
-        setActiveSegments(res.active_segments);
-        setAudioTracks(res.audio_tracks);
-        setPeakHighlights(res.peak_highlights);
+          setDuration(res.duration);
+          setKeyframes(res.keyframes);
+          setSilenceIntervals(res.silence_intervals);
+          setActiveSegments(res.active_segments);
+          setAudioTracks(res.audio_tracks);
+          setPeakHighlights(res.peak_highlights);
+          setWaveformPeaks(res.waveform_peaks || []);
 
-        if (res.active_segments.length > 0) {
-          setInPoint(res.active_segments[0][0]);
-          setOutPoint(res.active_segments[0][1]);
+          if (res.active_segments.length > 0) {
+            setInPoint(res.active_segments[0][0]);
+            setOutPoint(res.active_segments[0][1]);
+          } else {
+            setInPoint(0);
+            setOutPoint(Math.min(res.duration, 10));
+          }
+          setStatusMessage(
+            `Loaded: ${res.keyframes.length} I-frames, ${res.peak_highlights.length} peaks, ${res.audio_tracks.length} tracks, ${res.waveform_peaks?.length || 0} waveform samples`
+          );
         } else {
-          setInPoint(0);
-          setOutPoint(Math.min(res.duration, 10));
+          // Fallback for browser preview testing
+          if (blobUrl) setVideoUrl(blobUrl);
+          const simulatedDuration = 120;
+          setDuration(simulatedDuration);
+          const dummyKeyframes = Array.from({ length: 40 }, (_, i) => i * 3);
+          setKeyframes(dummyKeyframes);
+          const dummySilences: [number, number][] = [
+            [12, 18],
+            [45, 52],
+            [88, 96],
+          ];
+          setSilenceIntervals(dummySilences);
+          setPeakHighlights([10.5, 33.2, 74.8, 102.1]);
+          // Simulated sinusoidal waveform
+          const dummyWaves = Array.from({ length: 150 }, (_, i) =>
+            Math.abs(Math.sin(i / 5) * 0.8 + Math.random() * 0.2)
+          );
+          setWaveformPeaks(dummyWaves);
+          setAudioTracks([
+            { stream_index: 1, track_index: 0, codec: "aac", channels: 2, title: "Game Audio" },
+            { stream_index: 2, track_index: 1, codec: "aac", channels: 1, title: "Mic Input" },
+          ]);
+          setInPoint(18);
+          setOutPoint(45);
+          setStatusMessage("Loaded in preview mode");
         }
-        setStatusMessage(`Loaded: ${res.keyframes.length} I-frames, ${res.peak_highlights.length} peaks, ${res.audio_tracks.length} tracks, ${res.silence_intervals.length} silences`);
-      } else {
-        // Fallback for browser preview testing
-        if (blobUrl) setVideoUrl(blobUrl);
-        const simulatedDuration = 120;
-        setDuration(simulatedDuration);
-        const dummyKeyframes = Array.from({ length: 40 }, (_, i) => i * 3);
-        setKeyframes(dummyKeyframes);
-        const dummySilences: [number, number][] = [
-          [12, 18],
-          [45, 52],
-          [88, 96],
-        ];
-        setSilenceIntervals(dummySilences);
-        setPeakHighlights([10.5, 33.2, 74.8, 102.1]);
-        setAudioTracks([
-          { stream_index: 1, track_index: 0, codec: "aac", channels: 2, title: "Game Audio" },
-          { stream_index: 2, track_index: 1, codec: "aac", channels: 1, title: "Mic Input" },
-        ]);
-        setInPoint(18);
-        setOutPoint(45);
-        setStatusMessage("Loaded in browser preview mode");
+      } catch (err) {
+        console.error("Failed to inspect media:", err);
+        setStatusMessage(`Error: ${err}`);
+      } finally {
+        setIsLoading(false);
       }
-    } catch (err) {
-      console.error("Failed to inspect media:", err);
-      setStatusMessage(`Error: ${err}`);
-    } finally {
-      setIsLoading(false);
+    },
+    [noiseDb, selectedTrackIndex]
+  );
+
+  // Listen for native OS window file drop events
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+      import("@tauri-apps/api/event").then(({ listen }) => {
+        listen<{ paths: string[] }>("tauri://drag-drop", (event) => {
+          if (event.payload?.paths?.length > 0) {
+            handleFileSelected(event.payload.paths[0]);
+          }
+        }).then((u) => {
+          unlisten = u;
+        });
+      });
     }
-  };
+    return () => {
+      if (unlisten) unlisten();
+    };
+  }, [handleFileSelected]);
 
   // Switch active audio track for silence detection
   const handleSelectTrack = async (trackIdx: number) => {
@@ -150,12 +181,28 @@ export const App: React.FC = () => {
       setStatusMessage("No peak highlight moments detected in audio");
       return;
     }
-    // Find next highlight after current position
     const nextPeak = peakHighlights.find((p) => p > currentTime + 0.5);
     const target = nextPeak !== undefined ? nextPeak : peakHighlights[0];
     setCurrentTime(target);
     setStatusMessage(`Jumped to Peak Highlight at ${target.toFixed(2)}s`);
   }, [peakHighlights, currentTime]);
+
+  // Snap In-point to closest keyframe (I-frame)
+  const handleSnapInToKeyframe = useCallback(() => {
+    if (keyframes.length === 0 || inPoint === null) return;
+    let closest = keyframes[0];
+    let minDiff = Math.abs(keyframes[0] - inPoint);
+    for (const kf of keyframes) {
+      const diff = Math.abs(kf - inPoint);
+      if (diff < minDiff) {
+        minDiff = diff;
+        closest = kf;
+      }
+    }
+    setInPoint(closest);
+    setCurrentTime(closest);
+    setStatusMessage(`Snapped In-point to Keyframe at ${closest.toFixed(3)}s`);
+  }, [keyframes, inPoint]);
 
   // Re-scan silence when noiseDb slider adjusts
   const handleNoiseDbChange = async (newDb: number) => {
@@ -248,7 +295,9 @@ export const App: React.FC = () => {
         });
 
         setLastExportElapsedMs(res.total_elapsed_ms);
-        setStatusMessage(`Batch export finished! Created ${res.exported_count} clean clips in ${res.total_elapsed_ms.toFixed(1)}ms! Directory: ${res.output_dir}`);
+        setStatusMessage(
+          `Batch export finished! Created ${res.exported_count} clean clips in ${res.total_elapsed_ms.toFixed(1)}ms! Directory: ${res.output_dir}`
+        );
       } else {
         await new Promise((r) => setTimeout(r, 180));
         setLastExportElapsedMs(210.5);
@@ -279,7 +328,10 @@ export const App: React.FC = () => {
         <div className="flex items-center justify-between px-4 py-2 bg-danger-500/10 border-b border-danger-500/30 text-danger-500 text-xs">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 shrink-0" />
-            <span>FFmpeg binaries not found. Please place <code>ffmpeg.exe</code> and <code>ffprobe.exe</code> into: <strong>{envStatus.internal_bin_dir}</strong></span>
+            <span>
+              FFmpeg binaries not found. Please place <code>ffmpeg.exe</code> and <code>ffprobe.exe</code> into:{" "}
+              <strong>{envStatus.internal_bin_dir}</strong>
+            </span>
           </div>
           <button
             onClick={() => alert(`Please copy ffmpeg.exe & ffprobe.exe into: ${envStatus.internal_bin_dir}`)}
@@ -355,6 +407,7 @@ export const App: React.FC = () => {
                 keyframes={keyframes}
                 silenceIntervals={silenceIntervals}
                 peakHighlights={peakHighlights}
+                waveformPeaks={waveformPeaks}
                 isMagneticSnapEnabled={isMagneticSnapEnabled}
                 zoomLevel={zoomLevel}
                 onSeek={(t) => setCurrentTime(t)}
@@ -366,6 +419,7 @@ export const App: React.FC = () => {
               inPoint={inPoint}
               outPoint={outPoint}
               currentTime={currentTime}
+              keyframes={keyframes}
               isMagneticSnapEnabled={isMagneticSnapEnabled}
               noiseDb={noiseDb}
               zoomLevel={zoomLevel}
@@ -383,6 +437,7 @@ export const App: React.FC = () => {
               onZoomOut={() => setZoomLevel((z) => Math.max(1, z / 2))}
               onMarkIn={() => setInPoint(currentTime)}
               onMarkOut={() => setOutPoint(currentTime)}
+              onSnapInToKeyframe={handleSnapInToKeyframe}
               onStripSilence={handleStripSilence}
               onNextHighlight={handleNextHighlight}
               onExport={handleExport}
@@ -400,11 +455,24 @@ export const App: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3 shrink-0">
-          <span><kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">Space</kbd> Play</span>
-          <span><kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">I</kbd> In</span>
-          <span><kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">O</kbd> Out</span>
-          <span><kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">H</kbd> Next Peak</span>
-          <span><kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">Enter</kbd> Export</span>
+          <span>
+            <kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">Space</kbd> Play
+          </span>
+          <span>
+            <kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">←/→</kbd> Step
+          </span>
+          <span>
+            <kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">I</kbd> In
+          </span>
+          <span>
+            <kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">O</kbd> Out
+          </span>
+          <span>
+            <kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">H</kbd> Next Peak
+          </span>
+          <span>
+            <kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">Enter</kbd> Export
+          </span>
         </div>
       </footer>
     </div>

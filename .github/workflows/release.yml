@@ -89,6 +89,26 @@ jobs:
           cp README.md "$PKG_DIR/"
           cp LICENSE "$PKG_DIR/"
 
+      - name: Bundle portable FFmpeg for Windows
+        if: matrix.target == 'x86_64-pc-windows-msvc'
+        shell: pwsh
+        run: |
+          $PkgDir = "snipflow-${{ github.ref_name }}-${{ matrix.target }}"
+          Write-Host "Downloading standalone FFmpeg & FFprobe for Windows bundle..."
+          $FfmpegZip = "$env:TEMP\ffmpeg-win64.zip"
+          try {
+              Invoke-WebRequest -Uri "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-gpl.zip" -OutFile $FfmpegZip
+              Expand-Archive -Path $FfmpegZip -DestinationPath "$env:TEMP\ffmpeg-extracted" -Force
+              $BinFolder = Get-ChildItem -Path "$env:TEMP\ffmpeg-extracted" -Recurse -Directory -Filter "bin" | Select-Object -First 1
+              if ($BinFolder) {
+                  Copy-Item -Path "$($BinFolder.FullName)\ffmpeg.exe" -Destination "$PkgDir\ffmpeg.exe"
+                  Copy-Item -Path "$($BinFolder.FullName)\ffprobe.exe" -Destination "$PkgDir\ffprobe.exe"
+                  Write-Host "[✓] Successfully bundled ffmpeg.exe and ffprobe.exe into package"
+              }
+          } catch {
+              Write-Warning "FFmpeg pre-bundle download failed: $_"
+          }
+
       - name: Create archive (Windows)
         if: runner.os == 'Windows'
         shell: pwsh

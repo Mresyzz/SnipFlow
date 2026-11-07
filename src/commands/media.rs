@@ -3,6 +3,7 @@ use serde::Serialize;
 use tauri::command;
 use crate::core::ffmpeg::{find_binary, get_audio_streams, get_internal_bin_dir, AudioStreamInfo};
 use crate::core::highlight::detect_peak_highlights;
+use crate::core::waveform::generate_waveform_peaks;
 use crate::{detect_silence_track, get_duration, get_keyframes, invert_silence};
 
 #[derive(Serialize, Clone, Debug)]
@@ -23,6 +24,34 @@ pub struct MediaInspection {
     pub active_segments: Vec<(f64, f64)>,
     pub audio_tracks: Vec<AudioStreamInfo>,
     pub peak_highlights: Vec<f64>,
+    pub waveform_peaks: Vec<f32>,
+}
+
+#[command]
+pub async fn select_video_file_cmd() -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(|| {
+        let file = rfd::FileDialog::new()
+            .add_filter("Video Files", &["mp4", "mkv", "mov", "webm", "avi", "flv", "ts"])
+            .set_title("Select Raw Video for Lossless Cut")
+            .pick_file();
+
+        Ok(file.map(|p| p.to_string_lossy().to_string()))
+    })
+    .await
+    .map_err(|e| format!("Native dialog error: {e}"))?
+}
+
+#[command]
+pub async fn select_output_directory_cmd() -> Result<Option<String>, String> {
+    tokio::task::spawn_blocking(|| {
+        let dir = rfd::FileDialog::new()
+            .set_title("Select Export Destination Directory")
+            .pick_folder();
+
+        Ok(dir.map(|p| p.to_string_lossy().to_string()))
+    })
+    .await
+    .map_err(|e| format!("Native dialog error: {e}"))?
 }
 
 #[command]
@@ -62,15 +91,16 @@ pub async fn inspect_media_cmd(
         // 3. Audio tracks discovery
         let audio_tracks = get_audio_streams(&path).unwrap_or_default();
 
-        // 4. Audio silence detection & peak highlights with silent video guard
-        let (silence_intervals, peak_highlights) = if !audio_tracks.is_empty() {
+        // 4. Audio silence detection, peak highlights and waveform peaks with silent video guard
+        let (silence_intervals, peak_highlights, waveform_peaks) = if !audio_tracks.is_empty() {
             let db = noise_db.unwrap_or(-30.0);
             let min_dur = min_silence_duration.unwrap_or(0.5);
             let silences = detect_silence_track(&path, db, min_dur, track_index).unwrap_or_default();
             let peaks = detect_peak_highlights(&path, -14.0).unwrap_or_default();
-            (silences, peaks)
+            let waves = generate_waveform_peaks(&path, 300, track_index).unwrap_or_default();
+            (silences, peaks, waves)
         } else {
-            (Vec::new(), Vec::new())
+            (Vec::new(), Vec::new(), Vec::new())
         };
 
         // 5. Invert silence intervals to calculate clean active speech segments
@@ -88,6 +118,7 @@ pub async fn inspect_media_cmd(
             active_segments,
             audio_tracks,
             peak_highlights,
+            waveform_peaks,
         })
     })
     .await

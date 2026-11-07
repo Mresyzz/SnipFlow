@@ -75,6 +75,8 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             commands::media::check_environment_cmd,
+            commands::media::select_video_file_cmd,
+            commands::media::select_output_directory_cmd,
             commands::media::inspect_media_cmd,
             commands::media::rescan_silence_cmd,
             commands::media::scan_peak_highlights_cmd,
