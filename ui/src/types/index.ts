@@ -3,6 +3,15 @@ export interface EnvironmentStatus {
   ffprobe_available: boolean;
   ffmpeg_path: string | null;
   ffprobe_path: string | null;
+  internal_bin_dir: string;
+}
+
+export interface AudioStreamInfo {
+  stream_index: number;
+  track_index: number;
+  codec: string;
+  channels: number;
+  title?: string;
 }
 
 export interface MediaInspection {
@@ -11,6 +20,7 @@ export interface MediaInspection {
   keyframes: number[];
   silence_intervals: [number, number][];
   active_segments: [number, number][];
+  audio_tracks: AudioStreamInfo[];
 }
 
 export interface CutResult {

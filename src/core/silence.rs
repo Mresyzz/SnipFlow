@@ -4,18 +4,12 @@ use regex::Regex;
 use crate::core::ffmpeg::{find_binary, get_duration, run_command};
 use crate::error::{Result, SnipFlowError};
 
-/// Detects dead-air / silent intervals in an audio/video asset.
-///
-/// Returns a list of `(start, end)` tuples in seconds.
-///
-/// # Arguments
-/// * `video_path` - Path to the multimedia asset
-/// * `noise_db` - Noise floor threshold in decibels (e.g. `-30.0` or `-35.0`). Values >= 0 are normalized to negative dB.
-/// * `min_duration` - Minimum silence span in seconds to qualify as a cut candidate (e.g. `0.5`).
-pub fn detect_silence(
+/// Detects dead-air / silent intervals in an audio/video asset on a specific audio track.
+pub fn detect_silence_track(
     video_path: &Path,
     noise_db: f64,
     min_duration: f64,
+    track_index: Option<usize>,
 ) -> Result<Vec<(f64, f64)>> {
     if !video_path.exists() {
         return Err(SnipFlowError::FileNotFound(video_path.to_path_buf()));
@@ -28,15 +22,13 @@ pub fn detect_silence(
         });
     }
 
-    // Normalize dB value: silencedetect requires negative decibel string, e.g. "-30dB"
     let normalized_db = if noise_db > 0.0 { -noise_db } else { noise_db };
-
     let ffmpeg_path = find_binary("ffmpeg")?;
     let mut cmd = Command::new(ffmpeg_path);
 
     let filter_arg = format!("silencedetect=noise={}dB:d={}", normalized_db, min_duration);
 
-    // Bypasses video processing completely (-vn) and pipes output to null muxer
+    // Bypass video processing (-vn)
     cmd.args([
         "-nostats",
         "-hide_banner",
@@ -44,7 +36,12 @@ pub fn detect_silence(
         "-i",
     ]);
     cmd.arg(video_path);
+
+    // Map specific audio track if provided (e.g. 0:a:1 for secondary mic track)
+    let map_arg = format!("0:a:{}", track_index.unwrap_or(0));
     cmd.args([
+        "-map",
+        &map_arg,
         "-af",
         &filter_arg,
         "-f",
@@ -56,6 +53,15 @@ pub fn detect_silence(
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     parse_silencedetect_output(&stderr, video_path)
+}
+
+/// Detects dead-air / silent intervals on default primary audio track.
+pub fn detect_silence(
+    video_path: &Path,
+    noise_db: f64,
+    min_duration: f64,
+) -> Result<Vec<(f64, f64)>> {
+    detect_silence_track(video_path, noise_db, min_duration, None)
 }
 
 /// Parses silencedetect logs from FFmpeg stderr and pairs intervals.

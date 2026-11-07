@@ -4,8 +4,8 @@ import { VideoPlayer } from "./components/VideoPlayer";
 import { TimelineCanvas } from "./components/TimelineCanvas";
 import { Toolbar } from "./components/Toolbar";
 import { useShortcuts } from "./hooks/useShortcuts";
-import { MediaInspection, CutResult, EnvironmentStatus } from "./types";
-import { Film, Zap, Shield, Sparkles, AlertTriangle } from "lucide-react";
+import { MediaInspection, CutResult, EnvironmentStatus, AudioStreamInfo } from "./types";
+import { Film, Zap, Shield, Sparkles, AlertTriangle, FolderOpen } from "lucide-react";
 
 export const App: React.FC = () => {
   const [filePath, setFilePath] = useState<string | null>(null);
@@ -21,6 +21,8 @@ export const App: React.FC = () => {
   const [keyframes, setKeyframes] = useState<number[]>([]);
   const [silenceIntervals, setSilenceIntervals] = useState<[number, number][]>([]);
   const [activeSegments, setActiveSegments] = useState<[number, number][]>([]);
+  const [audioTracks, setAudioTracks] = useState<AudioStreamInfo[]>([]);
+  const [selectedTrackIndex, setSelectedTrackIndex] = useState<number>(0);
 
   const [inPoint, setInPoint] = useState<number | null>(null);
   const [outPoint, setOutPoint] = useState<number | null>(null);
@@ -58,9 +60,7 @@ export const App: React.FC = () => {
       if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
         const { invoke } = await import("@tauri-apps/api/core");
 
-        // Convert native path into asset:// URL to enable local video playback without CORS
         try {
-          // Tauri convertFileSrc
           const { convertFileSrc } = await import("@tauri-apps/api/core");
           const assetUrl = convertFileSrc(selectedPath);
           setVideoUrl(assetUrl);
@@ -72,14 +72,15 @@ export const App: React.FC = () => {
           filePath: selectedPath,
           noiseDb,
           minSilenceDuration: 0.5,
+          trackIndex: selectedTrackIndex,
         });
 
         setDuration(res.duration);
         setKeyframes(res.keyframes);
         setSilenceIntervals(res.silence_intervals);
         setActiveSegments(res.active_segments);
+        setAudioTracks(res.audio_tracks);
 
-        // Pre-select first active speech segment if available
         if (res.active_segments.length > 0) {
           setInPoint(res.active_segments[0][0]);
           setOutPoint(res.active_segments[0][1]);
@@ -87,7 +88,7 @@ export const App: React.FC = () => {
           setInPoint(0);
           setOutPoint(Math.min(res.duration, 10));
         }
-        setStatusMessage(`Loaded: ${res.keyframes.length} I-frames, ${res.silence_intervals.length} silences`);
+        setStatusMessage(`Loaded: ${res.keyframes.length} I-frames, ${res.audio_tracks.length} audio tracks, ${res.silence_intervals.length} silences`);
       } else {
         // Fallback for browser preview testing
         if (blobUrl) setVideoUrl(blobUrl);
@@ -101,6 +102,10 @@ export const App: React.FC = () => {
           [88, 96],
         ];
         setSilenceIntervals(dummySilences);
+        setAudioTracks([
+          { stream_index: 1, track_index: 0, codec: "aac", channels: 2, title: "Game Sound" },
+          { stream_index: 2, track_index: 1, codec: "aac", channels: 1, title: "Microphone" },
+        ]);
         setInPoint(18);
         setOutPoint(45);
         setStatusMessage("Loaded in browser preview mode");
@@ -110,6 +115,29 @@ export const App: React.FC = () => {
       setStatusMessage(`Error: ${err}`);
     } finally {
       setIsLoading(false);
+    }
+  };
+
+  // Switch active audio track for silence detection
+  const handleSelectTrack = async (trackIdx: number) => {
+    setSelectedTrackIndex(trackIdx);
+    if (!filePath) return;
+    setStatusMessage(`Scanning silence on Audio Track #${trackIdx + 1}...`);
+
+    try {
+      if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const silences = await invoke<[number, number][]>("rescan_silence_cmd", {
+          filePath,
+          noiseDb,
+          minSilenceDuration: 0.5,
+          trackIndex: trackIdx,
+        });
+        setSilenceIntervals(silences);
+        setStatusMessage(`Refreshed: ${silences.length} silences found on Track #${trackIdx + 1}`);
+      }
+    } catch (e) {
+      console.error("Track rescan failed", e);
     }
   };
 
@@ -125,6 +153,7 @@ export const App: React.FC = () => {
           filePath,
           noiseDb: newDb,
           minSilenceDuration: 0.5,
+          trackIndex: selectedTrackIndex,
         });
         setSilenceIntervals(silences);
       }
@@ -201,11 +230,18 @@ export const App: React.FC = () => {
     <div className="flex flex-col h-screen w-screen bg-dark-950 text-neutral-200">
       {/* Top Warning Banner if FFmpeg is missing */}
       {envStatus && !envStatus.ffmpeg_available && (
-        <div className="flex items-center justify-between px-4 py-1.5 bg-danger-500/10 border-b border-danger-500/30 text-danger-500 text-xs">
+        <div className="flex items-center justify-between px-4 py-2 bg-danger-500/10 border-b border-danger-500/30 text-danger-500 text-xs">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 shrink-0" />
-            <span>FFmpeg binary not detected in PATH. Please place ffmpeg.exe in the application folder or install FFmpeg.</span>
+            <span>FFmpeg binaries not found. Please place <code>ffmpeg.exe</code> and <code>ffprobe.exe</code> into: <strong>{envStatus.internal_bin_dir}</strong></span>
           </div>
+          <button
+            onClick={() => alert(`Please copy ffmpeg.exe & ffprobe.exe into: ${envStatus.internal_bin_dir}`)}
+            className="flex items-center gap-1 px-2.5 py-1 bg-dark-850 hover:bg-dark-800 text-neutral-200 border border-dark-750 rounded text-[11px]"
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+            <span>Show Location</span>
+          </button>
         </div>
       )}
 
@@ -289,6 +325,9 @@ export const App: React.FC = () => {
               isExporting={isExporting}
               lastExportElapsedMs={lastExportElapsedMs}
               silenceCount={silenceIntervals.length}
+              audioTracks={audioTracks}
+              selectedTrackIndex={selectedTrackIndex}
+              onSelectTrack={handleSelectTrack}
               onToggleMagneticSnap={() => setIsMagneticSnapEnabled(!isMagneticSnapEnabled)}
               onNoiseDbChange={handleNoiseDbChange}
               onZoomIn={() => setZoomLevel((z) => Math.min(8, z * 2))}

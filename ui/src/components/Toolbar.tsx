@@ -1,5 +1,6 @@
 import React from "react";
-import { Magnet, Scissors, MicOff, Download, CheckCircle, Clock, ZoomIn, ZoomOut } from "lucide-react";
+import { Magnet, Scissors, MicOff, Download, CheckCircle, Clock, ZoomIn, ZoomOut, Disc } from "lucide-react";
+import { AudioStreamInfo } from "../types";
 
 interface ToolbarProps {
   inPoint: number | null;
@@ -11,6 +12,9 @@ interface ToolbarProps {
   isExporting: boolean;
   lastExportElapsedMs: number | null;
   silenceCount: number;
+  audioTracks: AudioStreamInfo[];
+  selectedTrackIndex: number;
+  onSelectTrack: (trackIndex: number) => void;
   onToggleMagneticSnap: () => void;
   onNoiseDbChange: (db: number) => void;
   onZoomIn: () => void;
@@ -31,6 +35,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   isExporting,
   lastExportElapsedMs,
   silenceCount,
+  audioTracks,
+  selectedTrackIndex,
+  onSelectTrack,
   onToggleMagneticSnap,
   onNoiseDbChange,
   onZoomIn,
@@ -45,7 +52,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
   return (
     <div className="flex flex-wrap items-center justify-between gap-4 px-4 py-3 bg-dark-900 border border-dark-800 rounded-xl shadow-lg">
-      {/* Left section: In/Out points & Snapping */}
+      {/* Left section: In/Out points & Snapping & Zoom */}
       <div className="flex items-center gap-3">
         <button
           onClick={onToggleMagneticSnap}
@@ -111,8 +118,26 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </div>
       </div>
 
-      {/* Middle section: Silence Stripper Tuning */}
+      {/* Middle section: Multi-Track Selector & Silence Stripper */}
       <div className="flex items-center gap-3">
+        {audioTracks.length > 1 && (
+          <div className="flex items-center gap-1.5 bg-dark-850 px-2.5 py-1 rounded-lg border border-dark-750 text-xs text-neutral-300">
+            <Disc className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Track:</span>
+            <select
+              value={selectedTrackIndex}
+              onChange={(e) => onSelectTrack(Number(e.target.value))}
+              className="bg-transparent text-cyan-400 font-mono text-xs focus:outline-none cursor-pointer"
+            >
+              {audioTracks.map((t) => (
+                <option key={t.track_index} value={t.track_index} className="bg-dark-900 text-neutral-200">
+                  {t.title ? `${t.title} (#${t.track_index + 1})` : `Audio Track ${t.track_index + 1} (${t.codec})`}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
+
         <div className="flex items-center gap-2 text-xs text-neutral-400">
           <MicOff className="w-3.5 h-3.5 text-danger-500" />
           <span>Threshold:</span>
