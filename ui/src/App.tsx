@@ -353,7 +353,7 @@ export const App: React.FC = () => {
             <h1 className="text-sm font-bold tracking-wide text-neutral-100 flex items-center gap-1.5">
               SnipFlow
               <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-dark-800 text-cyan-400 border border-dark-700">
-                Lossless v0.2.0
+                Lossless v0.3.0
               </span>
             </h1>
           </div>
