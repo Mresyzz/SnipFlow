@@ -2,12 +2,18 @@
 name = "snipflow"
 version = "0.1.0"
 edition = "2021"
-authors = ["SnipFlow Contributors"]
+authors = ["Mresyzz <dev@snipflow.org>"]
 description = "Ultra-fast, local-first lossless video clipper & silence stripper powered by Rust and FFmpeg."
 license = "GPL-3.0-or-later"
 readme = "README.md"
+repository = "https://github.com/Mresyzz/SnipFlow"
+homepage = "https://github.com/Mresyzz/SnipFlow"
 keywords = ["video", "ffmpeg", "lossless-cut", "silence-detect", "keyframes"]
 categories = ["multimedia::video", "command-line-utilities"]
+exclude = [
+    "ui/*",
+    "assets/demo.gif",
+]
 
 [lib]
 name = "snipflow"
