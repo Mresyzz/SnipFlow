@@ -1,12 +1,17 @@
+export interface EnvironmentStatus {
+  ffmpeg_available: boolean;
+  ffprobe_available: boolean;
+  ffmpeg_path: string | null;
+  ffprobe_path: string | null;
+}
+
 export interface MediaInspection {
   path: string;
-  duration: f64;
+  duration: number;
   keyframes: number[];
   silence_intervals: [number, number][];
   active_segments: [number, number][];
 }
-
-type f64 = number;
 
 export interface CutResult {
   output_path: string;

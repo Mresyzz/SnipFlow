@@ -74,6 +74,7 @@ fn main() {
     // Default: Launch Tauri v2 desktop application
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
+            commands::media::check_environment_cmd,
             commands::media::inspect_media_cmd,
             commands::media::rescan_silence_cmd,
             commands::cut::lossless_cut_cmd,

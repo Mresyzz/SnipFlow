@@ -9,6 +9,7 @@ interface TimelineCanvasProps {
   keyframes: number[];
   silenceIntervals: [number, number][];
   isMagneticSnapEnabled: boolean;
+  zoomLevel: number;
   onSeek: (time: number) => void;
 }
 
@@ -20,6 +21,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   keyframes,
   silenceIntervals,
   isMagneticSnapEnabled,
+  zoomLevel,
   onSeek,
 }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -31,12 +33,11 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     (clientX: number, rect: DOMRect) => {
       const offsetX = Math.max(0, Math.min(clientX - rect.left, rect.width));
       const rawTime = (offsetX / rect.width) * duration;
-      return isMagneticSnapEnabled ? snapToKeyframe(rawTime, keyframes, 0.25) : rawTime;
+      return isMagneticSnapEnabled ? snapToKeyframe(rawTime, keyframes, 0.25 / zoomLevel) : rawTime;
     },
-    [duration, isMagneticSnapEnabled, keyframes]
+    [duration, isMagneticSnapEnabled, keyframes, zoomLevel]
   );
 
-  // Resize canvas according to device pixel ratio
   useEffect(() => {
     const canvas = canvasRef.current;
     const container = containerRef.current;
@@ -55,16 +56,20 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     if (!ctx) return;
     ctx.scale(dpr, dpr);
 
-    const timeToX = (t: number) => (t / (duration || 1)) * width;
+    const safeDuration = duration > 0 ? duration : 1;
+    const timeToX = (t: number) => (t / safeDuration) * width;
 
-    // 1. Clear background
+    // 1. Dark Base Background
     ctx.fillStyle = "#12151e";
     ctx.fillRect(0, 0, width, height);
 
-    // 2. Subtle timeline tick grid
+    // 2. Timeline Grid & Dynamic Time Labels
     ctx.strokeStyle = "#1b202c";
     ctx.lineWidth = 1;
-    const tickInterval = duration > 600 ? 60 : duration > 60 ? 10 : 2;
+    const baseInterval = duration > 600 ? 60 : duration > 60 ? 10 : 2;
+    const tickInterval = Math.max(0.5, baseInterval / zoomLevel);
+
+    let lastLabelX = -100;
     for (let t = 0; t <= duration; t += tickInterval) {
       const x = timeToX(t);
       ctx.beginPath();
@@ -72,12 +77,15 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       ctx.lineTo(x, height);
       ctx.stroke();
 
-      ctx.fillStyle = "#4a5568";
-      ctx.font = "10px monospace";
-      ctx.fillText(`${Math.floor(t)}s`, x + 3, 14);
+      if (x - lastLabelX > 45) {
+        ctx.fillStyle = "#4a5568";
+        ctx.font = "10px monospace";
+        ctx.fillText(`${t.toFixed(t % 1 !== 0 ? 1 : 0)}s`, x + 3, 14);
+        lastLabelX = x;
+      }
     }
 
-    // 3. Draw Silence Regions (Dead-air highlight)
+    // 3. Draw Silence Regions (Translucent warning strips)
     ctx.fillStyle = "rgba(255, 8, 68, 0.22)";
     for (const [start, end] of silenceIntervals) {
       const x0 = timeToX(start);
@@ -85,29 +93,41 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       ctx.fillRect(x0, 18, Math.max(2, x1 - x0), height - 24);
     }
 
-    // 4. Draw Keyframe (I-frame) Marks
+    // 4. Draw Keyframe (I-frame) Marks with High-Performance Pixel Decimation
     ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
     ctx.lineWidth = 1;
+    let lastKfPx = -10;
     for (const kf of keyframes) {
       const x = timeToX(kf);
+      // Skip redundant sub-pixel draws to guarantee 120 FPS
+      if (Math.abs(x - lastKfPx) < 1.5) continue;
+      lastKfPx = x;
+
       ctx.beginPath();
       ctx.moveTo(x, 18);
       ctx.lineTo(x, 26);
       ctx.stroke();
     }
 
-    // 5. Draw In/Out Cut Selection
+    // 5. Draw In/Out Cut Selection (Cyan highlighted zone)
     if (inPoint !== null && outPoint !== null) {
       const xIn = timeToX(inPoint);
       const xOut = timeToX(outPoint);
+      const selWidth = Math.max(2, xOut - xIn);
+
       ctx.fillStyle = "rgba(0, 242, 254, 0.14)";
-      ctx.fillRect(xIn, 18, Math.max(2, xOut - xIn), height - 24);
+      ctx.fillRect(xIn, 18, selWidth, height - 24);
       ctx.strokeStyle = "#00f2fe";
       ctx.lineWidth = 1.5;
-      ctx.strokeRect(xIn, 18, Math.max(2, xOut - xIn), height - 24);
+      ctx.strokeRect(xIn, 18, selWidth, height - 24);
+
+      // Boundary indicators
+      ctx.fillStyle = "#00f2fe";
+      ctx.fillRect(xIn - 2, 18, 4, height - 24);
+      ctx.fillRect(xOut - 2, 18, 4, height - 24);
     }
 
-    // 6. Draw Hover snap preview indicator
+    // 6. Draw Hover snap indicator
     if (hoverTime !== null) {
       const hx = timeToX(hoverTime);
       ctx.strokeStyle = "rgba(0, 242, 254, 0.4)";
@@ -119,7 +139,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       ctx.setLineDash([]);
     }
 
-    // 7. Draw Active Playhead
+    // 7. Draw Active Playhead with Neon Cyan Glow
     const px = timeToX(currentTime);
     ctx.shadowColor = "#00f2fe";
     ctx.shadowBlur = 8;
@@ -130,7 +150,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     ctx.lineTo(px, height);
     ctx.stroke();
 
-    // Playhead crown
+    // Playhead crown arrow
     ctx.fillStyle = "#00f2fe";
     ctx.beginPath();
     ctx.moveTo(px - 5, 0);
@@ -139,7 +159,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     ctx.closePath();
     ctx.fill();
     ctx.shadowBlur = 0;
-  }, [duration, currentTime, inPoint, outPoint, keyframes, silenceIntervals, hoverTime]);
+  }, [duration, currentTime, inPoint, outPoint, keyframes, silenceIntervals, hoverTime, zoomLevel]);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     setIsDragging(true);

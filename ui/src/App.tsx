@@ -1,16 +1,18 @@
-import React, { useState, useCallback } from "react";
+import React, { useState, useCallback, useEffect } from "react";
 import { DropZone } from "./components/DropZone";
 import { VideoPlayer } from "./components/VideoPlayer";
 import { TimelineCanvas } from "./components/TimelineCanvas";
 import { Toolbar } from "./components/Toolbar";
 import { useShortcuts } from "./hooks/useShortcuts";
-import { MediaInspection, CutResult } from "./types";
-import { Film, Zap, Shield, Sparkles } from "lucide-react";
+import { MediaInspection, CutResult, EnvironmentStatus } from "./types";
+import { Film, Zap, Shield, Sparkles, AlertTriangle } from "lucide-react";
 
 export const App: React.FC = () => {
   const [filePath, setFilePath] = useState<string | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
+
+  const [envStatus, setEnvStatus] = useState<EnvironmentStatus | null>(null);
 
   const [duration, setDuration] = useState<number>(0);
   const [currentTime, setCurrentTime] = useState<number>(0);
@@ -24,24 +26,48 @@ export const App: React.FC = () => {
   const [outPoint, setOutPoint] = useState<number | null>(null);
   const [isMagneticSnapEnabled, setIsMagneticSnapEnabled] = useState<boolean>(true);
   const [noiseDb, setNoiseDb] = useState<number>(-30);
+  const [zoomLevel, setZoomLevel] = useState<number>(1);
 
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [lastExportElapsedMs, setLastExportElapsedMs] = useState<number | null>(null);
   const [statusMessage, setStatusMessage] = useState<string>("Ready");
 
+  // Check multimedia runtime environment on startup
+  useEffect(() => {
+    async function checkEnv() {
+      if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+        try {
+          const { invoke } = await import("@tauri-apps/api/core");
+          const status = await invoke<EnvironmentStatus>("check_environment_cmd");
+          setEnvStatus(status);
+        } catch (e) {
+          console.error("Failed to check environment:", e);
+        }
+      }
+    }
+    checkEnv();
+  }, []);
+
   // Load and inspect media file via Tauri IPC or Browser Fallback
   const handleFileSelected = async (selectedPath: string, blobUrl?: string) => {
     setFilePath(selectedPath);
-    if (blobUrl) {
-      setVideoUrl(blobUrl);
-    }
     setIsLoading(true);
     setStatusMessage("Extracting keyframes & scanning dead-air...");
 
     try {
-      // Check if Tauri invoke is available
       if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
         const { invoke } = await import("@tauri-apps/api/core");
+
+        // Convert native path into asset:// URL to enable local video playback without CORS
+        try {
+          // Tauri convertFileSrc
+          const { convertFileSrc } = await import("@tauri-apps/api/core");
+          const assetUrl = convertFileSrc(selectedPath);
+          setVideoUrl(assetUrl);
+        } catch {
+          if (blobUrl) setVideoUrl(blobUrl);
+        }
+
         const res = await invoke<MediaInspection>("inspect_media_cmd", {
           filePath: selectedPath,
           noiseDb,
@@ -64,6 +90,7 @@ export const App: React.FC = () => {
         setStatusMessage(`Loaded: ${res.keyframes.length} I-frames, ${res.silence_intervals.length} silences`);
       } else {
         // Fallback for browser preview testing
+        if (blobUrl) setVideoUrl(blobUrl);
         const simulatedDuration = 120;
         setDuration(simulatedDuration);
         const dummyKeyframes = Array.from({ length: 40 }, (_, i) => i * 3);
@@ -126,7 +153,7 @@ export const App: React.FC = () => {
     const end = outPoint ?? duration;
 
     if (start >= end) {
-      setStatusMessage("Error: In point must be before Out point");
+      setStatusMessage("Error: In point must be strictly before Out point");
       return;
     }
 
@@ -172,6 +199,16 @@ export const App: React.FC = () => {
 
   return (
     <div className="flex flex-col h-screen w-screen bg-dark-950 text-neutral-200">
+      {/* Top Warning Banner if FFmpeg is missing */}
+      {envStatus && !envStatus.ffmpeg_available && (
+        <div className="flex items-center justify-between px-4 py-1.5 bg-danger-500/10 border-b border-danger-500/30 text-danger-500 text-xs">
+          <div className="flex items-center gap-2">
+            <AlertTriangle className="w-4 h-4 shrink-0" />
+            <span>FFmpeg binary not detected in PATH. Please place ffmpeg.exe in the application folder or install FFmpeg.</span>
+          </div>
+        </div>
+      )}
+
       {/* Top Navigation Bar */}
       <header className="flex items-center justify-between px-5 py-2.5 bg-dark-900 border-b border-dark-800">
         <div className="flex items-center gap-2.5">
@@ -182,7 +219,7 @@ export const App: React.FC = () => {
             <h1 className="text-sm font-bold tracking-wide text-neutral-100 flex items-center gap-1.5">
               SnipFlow
               <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-dark-800 text-cyan-400 border border-dark-700">
-                Lossless
+                Lossless v0.2.0
               </span>
             </h1>
           </div>
@@ -236,6 +273,7 @@ export const App: React.FC = () => {
                 keyframes={keyframes}
                 silenceIntervals={silenceIntervals}
                 isMagneticSnapEnabled={isMagneticSnapEnabled}
+                zoomLevel={zoomLevel}
                 onSeek={(t) => setCurrentTime(t)}
               />
             </div>
@@ -247,11 +285,14 @@ export const App: React.FC = () => {
               currentTime={currentTime}
               isMagneticSnapEnabled={isMagneticSnapEnabled}
               noiseDb={noiseDb}
+              zoomLevel={zoomLevel}
               isExporting={isExporting}
               lastExportElapsedMs={lastExportElapsedMs}
               silenceCount={silenceIntervals.length}
               onToggleMagneticSnap={() => setIsMagneticSnapEnabled(!isMagneticSnapEnabled)}
               onNoiseDbChange={handleNoiseDbChange}
+              onZoomIn={() => setZoomLevel((z) => Math.min(8, z * 2))}
+              onZoomOut={() => setZoomLevel((z) => Math.max(1, z / 2))}
               onMarkIn={() => setInPoint(currentTime)}
               onMarkOut={() => setOutPoint(currentTime)}
               onStripSilence={handleStripSilence}

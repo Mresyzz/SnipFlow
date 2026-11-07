@@ -36,13 +36,13 @@ pub fn lossless_cut(
 
     // Format timestamps with millisecond precision
     let start_str = format!("{:.3}", start);
-    let end_str = format!("{:.3}", end);
+    let duration_str = format!("{:.3}", end - start);
 
-    // Fast-seek (-ss before -i) + stream copy (-c copy) + zero-timestamp reset
+    // Fast-seek (-ss before -i) with duration limit (-t) + stream copy (-c copy) + zero-timestamp reset
     cmd.args([
         "-y",
         "-ss", &start_str,
-        "-to", &end_str,
+        "-t", &duration_str,
         "-i",
     ]);
     cmd.arg(video_path);

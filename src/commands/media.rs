@@ -1,7 +1,16 @@
 use std::path::PathBuf;
 use serde::Serialize;
 use tauri::command;
+use crate::core::ffmpeg::find_binary;
 use crate::{detect_silence, get_duration, get_keyframes, invert_silence};
+
+#[derive(Serialize, Clone, Debug)]
+pub struct EnvironmentStatus {
+    pub ffmpeg_available: bool,
+    pub ffprobe_available: bool,
+    pub ffmpeg_path: Option<String>,
+    pub ffprobe_path: Option<String>,
+}
 
 #[derive(Serialize, Clone, Debug)]
 pub struct MediaInspection {
@@ -10,6 +19,19 @@ pub struct MediaInspection {
     pub keyframes: Vec<f64>,
     pub silence_intervals: Vec<(f64, f64)>,
     pub active_segments: Vec<(f64, f64)>,
+}
+
+#[command]
+pub fn check_environment_cmd() -> EnvironmentStatus {
+    let ffmpeg = find_binary("ffmpeg").ok();
+    let ffprobe = find_binary("ffprobe").ok();
+
+    EnvironmentStatus {
+        ffmpeg_available: ffmpeg.is_some(),
+        ffprobe_available: ffprobe.is_some(),
+        ffmpeg_path: ffmpeg.map(|p| p.to_string_lossy().to_string()),
+        ffprobe_path: ffprobe.map(|p| p.to_string_lossy().to_string()),
+    }
 }
 
 #[command]

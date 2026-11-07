@@ -1,5 +1,5 @@
 import React from "react";
-import { Magnet, Scissors, MicOff, Download, CheckCircle, Clock } from "lucide-react";
+import { Magnet, Scissors, MicOff, Download, CheckCircle, Clock, ZoomIn, ZoomOut } from "lucide-react";
 
 interface ToolbarProps {
   inPoint: number | null;
@@ -7,11 +7,14 @@ interface ToolbarProps {
   currentTime: number;
   isMagneticSnapEnabled: boolean;
   noiseDb: number;
+  zoomLevel: number;
   isExporting: boolean;
   lastExportElapsedMs: number | null;
   silenceCount: number;
   onToggleMagneticSnap: () => void;
   onNoiseDbChange: (db: number) => void;
+  onZoomIn: () => void;
+  onZoomOut: () => void;
   onMarkIn: () => void;
   onMarkOut: () => void;
   onStripSilence: () => void;
@@ -24,11 +27,14 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   currentTime,
   isMagneticSnapEnabled,
   noiseDb,
+  zoomLevel,
   isExporting,
   lastExportElapsedMs,
   silenceCount,
   onToggleMagneticSnap,
   onNoiseDbChange,
+  onZoomIn,
+  onZoomOut,
   onMarkIn,
   onMarkOut,
   onStripSilence,
@@ -82,6 +88,27 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             Pos: {currentTime.toFixed(2)}s
           </span>
         </div>
+
+        {/* Timeline Zoom Controls */}
+        <div className="flex items-center gap-1 ml-1 bg-dark-850 px-1.5 py-0.5 rounded border border-dark-750">
+          <button
+            onClick={onZoomOut}
+            disabled={zoomLevel <= 1}
+            className="p-1 hover:text-cyan-400 disabled:opacity-30 text-neutral-400 transition"
+            title="Zoom Out"
+          >
+            <ZoomOut className="w-3.5 h-3.5" />
+          </button>
+          <span className="text-[10px] font-mono text-neutral-400 px-1">{zoomLevel}x</span>
+          <button
+            onClick={onZoomIn}
+            disabled={zoomLevel >= 8}
+            className="p-1 hover:text-cyan-400 disabled:opacity-30 text-neutral-400 transition"
+            title="Zoom In"
+          >
+            <ZoomIn className="w-3.5 h-3.5" />
+          </button>
+        </div>
       </div>
 
       {/* Middle section: Silence Stripper Tuning */}
@@ -103,7 +130,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
         <button
           onClick={onStripSilence}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-danger-500/10 hover:bg-danger-500/20 border border-danger-500/30 text-xs font-medium text-danger-500 transition"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-danger-500/10 hover:bg-danger-500/20 border border-danger-500/30 text-xs font-medium text-danger-500 transition cursor-pointer"
           title="Auto-select first active speech segment"
         >
           <Scissors className="w-3.5 h-3.5" />
