@@ -4,7 +4,7 @@ import { VideoPlayer } from "./components/VideoPlayer";
 import { TimelineCanvas } from "./components/TimelineCanvas";
 import { Toolbar } from "./components/Toolbar";
 import { useShortcuts } from "./hooks/useShortcuts";
-import { MediaInspection, CutResult, EnvironmentStatus, AudioStreamInfo } from "./types";
+import { MediaInspection, CutResult, BatchExportResult, EnvironmentStatus, AudioStreamInfo } from "./types";
 import { Film, Zap, Shield, Sparkles, AlertTriangle, FolderOpen } from "lucide-react";
 
 export const App: React.FC = () => {
@@ -23,6 +23,7 @@ export const App: React.FC = () => {
   const [activeSegments, setActiveSegments] = useState<[number, number][]>([]);
   const [audioTracks, setAudioTracks] = useState<AudioStreamInfo[]>([]);
   const [selectedTrackIndex, setSelectedTrackIndex] = useState<number>(0);
+  const [peakHighlights, setPeakHighlights] = useState<number[]>([]);
 
   const [inPoint, setInPoint] = useState<number | null>(null);
   const [outPoint, setOutPoint] = useState<number | null>(null);
@@ -54,7 +55,7 @@ export const App: React.FC = () => {
   const handleFileSelected = async (selectedPath: string, blobUrl?: string) => {
     setFilePath(selectedPath);
     setIsLoading(true);
-    setStatusMessage("Extracting keyframes & scanning dead-air...");
+    setStatusMessage("Extracting keyframes, audio tracks & scanning dead-air...");
 
     try {
       if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
@@ -80,6 +81,7 @@ export const App: React.FC = () => {
         setSilenceIntervals(res.silence_intervals);
         setActiveSegments(res.active_segments);
         setAudioTracks(res.audio_tracks);
+        setPeakHighlights(res.peak_highlights);
 
         if (res.active_segments.length > 0) {
           setInPoint(res.active_segments[0][0]);
@@ -88,7 +90,7 @@ export const App: React.FC = () => {
           setInPoint(0);
           setOutPoint(Math.min(res.duration, 10));
         }
-        setStatusMessage(`Loaded: ${res.keyframes.length} I-frames, ${res.audio_tracks.length} audio tracks, ${res.silence_intervals.length} silences`);
+        setStatusMessage(`Loaded: ${res.keyframes.length} I-frames, ${res.peak_highlights.length} peaks, ${res.audio_tracks.length} tracks, ${res.silence_intervals.length} silences`);
       } else {
         // Fallback for browser preview testing
         if (blobUrl) setVideoUrl(blobUrl);
@@ -102,9 +104,10 @@ export const App: React.FC = () => {
           [88, 96],
         ];
         setSilenceIntervals(dummySilences);
+        setPeakHighlights([10.5, 33.2, 74.8, 102.1]);
         setAudioTracks([
-          { stream_index: 1, track_index: 0, codec: "aac", channels: 2, title: "Game Sound" },
-          { stream_index: 2, track_index: 1, codec: "aac", channels: 1, title: "Microphone" },
+          { stream_index: 1, track_index: 0, codec: "aac", channels: 2, title: "Game Audio" },
+          { stream_index: 2, track_index: 1, codec: "aac", channels: 1, title: "Mic Input" },
         ]);
         setInPoint(18);
         setOutPoint(45);
@@ -141,6 +144,19 @@ export const App: React.FC = () => {
     }
   };
 
+  // Jump to next peak highlight moment
+  const handleNextHighlight = useCallback(() => {
+    if (peakHighlights.length === 0) {
+      setStatusMessage("No peak highlight moments detected in audio");
+      return;
+    }
+    // Find next highlight after current position
+    const nextPeak = peakHighlights.find((p) => p > currentTime + 0.5);
+    const target = nextPeak !== undefined ? nextPeak : peakHighlights[0];
+    setCurrentTime(target);
+    setStatusMessage(`Jumped to Peak Highlight at ${target.toFixed(2)}s`);
+  }, [peakHighlights, currentTime]);
+
   // Re-scan silence when noiseDb slider adjusts
   const handleNoiseDbChange = async (newDb: number) => {
     setNoiseDb(newDb);
@@ -175,7 +191,7 @@ export const App: React.FC = () => {
     }
   }, [activeSegments]);
 
-  // Execute lossless cut export
+  // Execute single lossless cut export
   const handleExport = useCallback(async () => {
     if (!filePath) return;
     const start = inPoint ?? 0;
@@ -204,7 +220,6 @@ export const App: React.FC = () => {
         setLastExportElapsedMs(res.elapsed_ms);
         setStatusMessage(`Instant export finished in ${res.elapsed_ms.toFixed(1)}ms! Output: ${res.output_path}`);
       } else {
-        // Browser demo mock
         await new Promise((r) => setTimeout(r, 90));
         setLastExportElapsedMs(88.4);
         setStatusMessage(`Simulated lossless cut finished in 88.4ms`);
@@ -216,12 +231,43 @@ export const App: React.FC = () => {
     }
   }, [filePath, inPoint, outPoint, duration]);
 
+  // Execute batch multi-clip export
+  const handleBatchExport = useCallback(async () => {
+    if (!filePath || activeSegments.length === 0) return;
+
+    setIsExporting(true);
+    setStatusMessage(`Batch exporting ${activeSegments.length} clean clips...`);
+
+    try {
+      if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const res = await invoke<BatchExportResult>("batch_export_segments_cmd", {
+          sourcePath: filePath,
+          segments: activeSegments,
+          outputDirOverride: null,
+        });
+
+        setLastExportElapsedMs(res.total_elapsed_ms);
+        setStatusMessage(`Batch export finished! Created ${res.exported_count} clean clips in ${res.total_elapsed_ms.toFixed(1)}ms! Directory: ${res.output_dir}`);
+      } else {
+        await new Promise((r) => setTimeout(r, 180));
+        setLastExportElapsedMs(210.5);
+        setStatusMessage(`Simulated batch export finished! Created ${activeSegments.length} clips`);
+      }
+    } catch (err) {
+      setStatusMessage(`Batch export error: ${err}`);
+    } finally {
+      setIsExporting(false);
+    }
+  }, [filePath, activeSegments]);
+
   // Bind keyboard shortcuts
   useShortcuts({
     togglePlay: () => setIsPlaying((prev) => !prev),
     markIn: () => setInPoint(currentTime),
     markOut: () => setOutPoint(currentTime),
     triggerExport: handleExport,
+    onNextHighlight: handleNextHighlight,
     stepFrameForward: () => setCurrentTime((t) => Math.min(duration, t + 0.04)),
     stepFrameBackward: () => setCurrentTime((t) => Math.max(0, t - 0.04)),
   });
@@ -237,7 +283,7 @@ export const App: React.FC = () => {
           </div>
           <button
             onClick={() => alert(`Please copy ffmpeg.exe & ffprobe.exe into: ${envStatus.internal_bin_dir}`)}
-            className="flex items-center gap-1 px-2.5 py-1 bg-dark-850 hover:bg-dark-800 text-neutral-200 border border-dark-750 rounded text-[11px]"
+            className="flex items-center gap-1 px-2.5 py-1 bg-dark-850 hover:bg-dark-800 text-neutral-200 border border-dark-750 rounded text-[11px] cursor-pointer"
           >
             <FolderOpen className="w-3.5 h-3.5" />
             <span>Show Location</span>
@@ -308,6 +354,7 @@ export const App: React.FC = () => {
                 outPoint={outPoint}
                 keyframes={keyframes}
                 silenceIntervals={silenceIntervals}
+                peakHighlights={peakHighlights}
                 isMagneticSnapEnabled={isMagneticSnapEnabled}
                 zoomLevel={zoomLevel}
                 onSeek={(t) => setCurrentTime(t)}
@@ -327,6 +374,8 @@ export const App: React.FC = () => {
               silenceCount={silenceIntervals.length}
               audioTracks={audioTracks}
               selectedTrackIndex={selectedTrackIndex}
+              highlightCount={peakHighlights.length}
+              activeSegmentCount={activeSegments.length}
               onSelectTrack={handleSelectTrack}
               onToggleMagneticSnap={() => setIsMagneticSnapEnabled(!isMagneticSnapEnabled)}
               onNoiseDbChange={handleNoiseDbChange}
@@ -335,7 +384,9 @@ export const App: React.FC = () => {
               onMarkIn={() => setInPoint(currentTime)}
               onMarkOut={() => setOutPoint(currentTime)}
               onStripSilence={handleStripSilence}
+              onNextHighlight={handleNextHighlight}
               onExport={handleExport}
+              onBatchExport={handleBatchExport}
             />
           </>
         )}
@@ -352,6 +403,7 @@ export const App: React.FC = () => {
           <span><kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">Space</kbd> Play</span>
           <span><kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">I</kbd> In</span>
           <span><kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">O</kbd> Out</span>
+          <span><kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">H</kbd> Next Peak</span>
           <span><kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">Enter</kbd> Export</span>
         </div>
       </footer>

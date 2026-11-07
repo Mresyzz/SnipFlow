@@ -77,7 +77,9 @@ fn main() {
             commands::media::check_environment_cmd,
             commands::media::inspect_media_cmd,
             commands::media::rescan_silence_cmd,
+            commands::media::scan_peak_highlights_cmd,
             commands::cut::lossless_cut_cmd,
+            commands::cut::batch_export_segments_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running SnipFlow desktop application");

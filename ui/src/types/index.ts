@@ -21,6 +21,7 @@ export interface MediaInspection {
   silence_intervals: [number, number][];
   active_segments: [number, number][];
   audio_tracks: AudioStreamInfo[];
+  peak_highlights: number[];
 }
 
 export interface CutResult {
@@ -29,4 +30,11 @@ export interface CutResult {
   start: number;
   end: number;
   duration: number;
+}
+
+export interface BatchExportResult {
+  exported_count: number;
+  total_elapsed_ms: number;
+  output_dir: string;
+  clips: string[];
 }

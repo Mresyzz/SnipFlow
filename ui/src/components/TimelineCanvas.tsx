@@ -8,6 +8,7 @@ interface TimelineCanvasProps {
   outPoint: number | null;
   keyframes: number[];
   silenceIntervals: [number, number][];
+  peakHighlights: number[];
   isMagneticSnapEnabled: boolean;
   zoomLevel: number;
   onSeek: (time: number) => void;
@@ -20,6 +21,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   outPoint,
   keyframes,
   silenceIntervals,
+  peakHighlights,
   isMagneticSnapEnabled,
   zoomLevel,
   onSeek,
@@ -93,13 +95,32 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       ctx.fillRect(x0, 18, Math.max(2, x1 - x0), height - 24);
     }
 
-    // 4. Draw Keyframe (I-frame) Marks with High-Performance Pixel Decimation
+    // 4. Draw Peak Highlight Markers (Gold/Amber Neon Indicators)
+    ctx.shadowColor = "#f59e0b";
+    ctx.shadowBlur = 6;
+    ctx.fillStyle = "#f59e0b";
+    for (const peak of peakHighlights) {
+      const x = timeToX(peak);
+      ctx.beginPath();
+      ctx.arc(x, 54, 3, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Flag needle
+      ctx.strokeStyle = "rgba(245, 158, 11, 0.5)";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, 48);
+      ctx.lineTo(x, 62);
+      ctx.stroke();
+    }
+    ctx.shadowBlur = 0;
+
+    // 5. Draw Keyframe (I-frame) Marks with High-Performance Pixel Decimation
     ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
     ctx.lineWidth = 1;
     let lastKfPx = -10;
     for (const kf of keyframes) {
       const x = timeToX(kf);
-      // Skip redundant sub-pixel draws to guarantee 120 FPS
       if (Math.abs(x - lastKfPx) < 1.5) continue;
       lastKfPx = x;
 
@@ -109,7 +130,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       ctx.stroke();
     }
 
-    // 5. Draw In/Out Cut Selection (Cyan highlighted zone)
+    // 6. Draw In/Out Cut Selection (Cyan highlighted zone)
     if (inPoint !== null && outPoint !== null) {
       const xIn = timeToX(inPoint);
       const xOut = timeToX(outPoint);
@@ -121,13 +142,12 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       ctx.lineWidth = 1.5;
       ctx.strokeRect(xIn, 18, selWidth, height - 24);
 
-      // Boundary indicators
       ctx.fillStyle = "#00f2fe";
       ctx.fillRect(xIn - 2, 18, 4, height - 24);
       ctx.fillRect(xOut - 2, 18, 4, height - 24);
     }
 
-    // 6. Draw Hover snap indicator
+    // 7. Draw Hover snap indicator
     if (hoverTime !== null) {
       const hx = timeToX(hoverTime);
       ctx.strokeStyle = "rgba(0, 242, 254, 0.4)";
@@ -139,7 +159,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       ctx.setLineDash([]);
     }
 
-    // 7. Draw Active Playhead with Neon Cyan Glow
+    // 8. Draw Active Playhead with Neon Cyan Glow
     const px = timeToX(currentTime);
     ctx.shadowColor = "#00f2fe";
     ctx.shadowBlur = 8;
@@ -150,7 +170,6 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     ctx.lineTo(px, height);
     ctx.stroke();
 
-    // Playhead crown arrow
     ctx.fillStyle = "#00f2fe";
     ctx.beginPath();
     ctx.moveTo(px - 5, 0);
@@ -159,7 +178,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     ctx.closePath();
     ctx.fill();
     ctx.shadowBlur = 0;
-  }, [duration, currentTime, inPoint, outPoint, keyframes, silenceIntervals, hoverTime, zoomLevel]);
+  }, [duration, currentTime, inPoint, outPoint, keyframes, silenceIntervals, peakHighlights, hoverTime, zoomLevel]);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     setIsDragging(true);

@@ -7,6 +7,7 @@ pub mod error;
 
 pub use core::cut::{invert_silence, lossless_cut};
 pub use core::ffmpeg::{find_binary, get_audio_streams, get_duration, AudioStreamInfo};
+pub use core::highlight::detect_peak_highlights;
 pub use core::keyframe::get_keyframes;
 pub use core::silence::{detect_silence, detect_silence_track};
 pub use error::{Result, SnipFlowError};

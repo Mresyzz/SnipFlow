@@ -5,6 +5,7 @@ interface ShortcutActions {
   markIn: () => void;
   markOut: () => void;
   triggerExport: () => void;
+  onNextHighlight?: () => void;
   stepFrameForward?: () => void;
   stepFrameBackward?: () => void;
 }
@@ -14,6 +15,7 @@ export function useShortcuts({
   markIn,
   markOut,
   triggerExport,
+  onNextHighlight,
   stepFrameForward,
   stepFrameBackward,
 }: ShortcutActions) {
@@ -36,6 +38,12 @@ export function useShortcuts({
           e.preventDefault();
           markOut();
           break;
+        case "KeyH":
+          if (onNextHighlight) {
+            e.preventDefault();
+            onNextHighlight();
+          }
+          break;
         case "Enter":
           e.preventDefault();
           triggerExport();
@@ -57,5 +65,5 @@ export function useShortcuts({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [togglePlay, markIn, markOut, triggerExport, stepFrameForward, stepFrameBackward]);
+  }, [togglePlay, markIn, markOut, triggerExport, onNextHighlight, stepFrameForward, stepFrameBackward]);
 }

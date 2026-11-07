@@ -2,6 +2,7 @@ use std::path::PathBuf;
 use serde::Serialize;
 use tauri::command;
 use crate::core::ffmpeg::{find_binary, get_audio_streams, get_internal_bin_dir, AudioStreamInfo};
+use crate::core::highlight::detect_peak_highlights;
 use crate::{detect_silence_track, get_duration, get_keyframes, invert_silence};
 
 #[derive(Serialize, Clone, Debug)]
@@ -21,6 +22,7 @@ pub struct MediaInspection {
     pub silence_intervals: Vec<(f64, f64)>,
     pub active_segments: Vec<(f64, f64)>,
     pub audio_tracks: Vec<AudioStreamInfo>,
+    pub peak_highlights: Vec<f64>,
 }
 
 #[command]
@@ -68,6 +70,9 @@ pub async fn inspect_media_cmd(
         // 5. Invert silence intervals to calculate clean active speech segments
         let active_segments = invert_silence(&silence_intervals, duration);
 
+        // 6. Fast peak highlight heuristic (defaults to -14.0 LUFS)
+        let peak_highlights = detect_peak_highlights(&path, -14.0).unwrap_or_default();
+
         Ok(MediaInspection {
             path: file_path,
             duration,
@@ -75,6 +80,7 @@ pub async fn inspect_media_cmd(
             silence_intervals,
             active_segments,
             audio_tracks,
+            peak_highlights,
         })
     })
     .await
@@ -97,4 +103,20 @@ pub async fn rescan_silence_cmd(
     })
     .await
     .map_err(|e| format!("Silence rescan failed: {e}"))?
+}
+
+#[command]
+pub async fn scan_peak_highlights_cmd(
+    file_path: String,
+    threshold_lufs: Option<f64>,
+) -> Result<Vec<f64>, String> {
+    tokio::task::spawn_blocking(move || {
+        let path = PathBuf::from(&file_path);
+        if !path.exists() {
+            return Err(format!("File does not exist: {file_path}"));
+        }
+        detect_peak_highlights(&path, threshold_lufs.unwrap_or(-14.0)).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("Highlight scan failed: {e}"))?
 }
