@@ -62,16 +62,23 @@ pub async fn inspect_media_cmd(
         // 3. Audio tracks discovery
         let audio_tracks = get_audio_streams(&path).unwrap_or_default();
 
-        // 4. Audio silence detection on chosen track
-        let db = noise_db.unwrap_or(-30.0);
-        let min_dur = min_silence_duration.unwrap_or(0.5);
-        let silence_intervals = detect_silence_track(&path, db, min_dur, track_index).map_err(|e| e.to_string())?;
+        // 4. Audio silence detection & peak highlights with silent video guard
+        let (silence_intervals, peak_highlights) = if !audio_tracks.is_empty() {
+            let db = noise_db.unwrap_or(-30.0);
+            let min_dur = min_silence_duration.unwrap_or(0.5);
+            let silences = detect_silence_track(&path, db, min_dur, track_index).unwrap_or_default();
+            let peaks = detect_peak_highlights(&path, -14.0).unwrap_or_default();
+            (silences, peaks)
+        } else {
+            (Vec::new(), Vec::new())
+        };
 
         // 5. Invert silence intervals to calculate clean active speech segments
-        let active_segments = invert_silence(&silence_intervals, duration);
-
-        // 6. Fast peak highlight heuristic (defaults to -14.0 LUFS)
-        let peak_highlights = detect_peak_highlights(&path, -14.0).unwrap_or_default();
+        let active_segments = if !silence_intervals.is_empty() {
+            invert_silence(&silence_intervals, duration)
+        } else {
+            vec![(0.0, duration)]
+        };
 
         Ok(MediaInspection {
             path: file_path,
@@ -99,6 +106,10 @@ pub async fn rescan_silence_cmd(
         if !path.exists() {
             return Err(format!("File does not exist: {file_path}"));
         }
+        let audio_tracks = get_audio_streams(&path).unwrap_or_default();
+        if audio_tracks.is_empty() {
+            return Ok(Vec::new());
+        }
         detect_silence_track(&path, noise_db, min_silence_duration, track_index).map_err(|e| e.to_string())
     })
     .await
@@ -114,6 +125,10 @@ pub async fn scan_peak_highlights_cmd(
         let path = PathBuf::from(&file_path);
         if !path.exists() {
             return Err(format!("File does not exist: {file_path}"));
+        }
+        let audio_tracks = get_audio_streams(&path).unwrap_or_default();
+        if audio_tracks.is_empty() {
+            return Ok(Vec::new());
         }
         detect_peak_highlights(&path, threshold_lufs.unwrap_or(-14.0)).map_err(|e| e.to_string())
     })

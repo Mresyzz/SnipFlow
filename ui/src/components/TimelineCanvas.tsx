@@ -130,10 +130,12 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       ctx.stroke();
     }
 
-    // 6. Draw In/Out Cut Selection (Cyan highlighted zone)
+    // 6. Draw In/Out Cut Selection with Inverted Coordinate Normalization
     if (inPoint !== null && outPoint !== null) {
-      const xIn = timeToX(inPoint);
-      const xOut = timeToX(outPoint);
+      const rawInX = timeToX(inPoint);
+      const rawOutX = timeToX(outPoint);
+      const xIn = Math.min(rawInX, rawOutX);
+      const xOut = Math.max(rawInX, rawOutX);
       const selWidth = Math.max(2, xOut - xIn);
 
       ctx.fillStyle = "rgba(0, 242, 254, 0.14)";
@@ -142,6 +144,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       ctx.lineWidth = 1.5;
       ctx.strokeRect(xIn, 18, selWidth, height - 24);
 
+      // Boundary grip indicators
       ctx.fillStyle = "#00f2fe";
       ctx.fillRect(xIn - 2, 18, 4, height - 24);
       ctx.fillRect(xOut - 2, 18, 4, height - 24);

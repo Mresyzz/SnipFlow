@@ -19,7 +19,7 @@ pub struct AudioStreamInfo {
     pub title: Option<String>,
 }
 
-/// Resolves the absolute path or identifier for an FFmpeg multimedia binary.
+/// Resolves the absolute path for an FFmpeg multimedia binary.
 pub fn find_binary(binary_name: &str) -> Result<PathBuf> {
     // 1. Check custom environment override (e.g. SNIPFLOW_FFMPEG or FFMPEG_PATH)
     let env_key = format!("SNIPFLOW_{}", binary_name.to_uppercase());
@@ -73,8 +73,18 @@ pub fn find_binary(binary_name: &str) -> Result<PathBuf> {
         }
     }
 
-    // 4. Fallback to system PATH resolution
+    // 4. Resolve absolute path from system PATH environment variable
     let exe_name = format_exe_name(binary_name);
+    if let Ok(path_var) = std::env::var("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            let candidate = dir.join(&exe_name);
+            if candidate.is_file() {
+                return Ok(candidate);
+            }
+        }
+    }
+
+    // 5. Final fallback probe
     let mut probe_cmd = Command::new(&exe_name);
     probe_cmd.arg("-version");
     apply_platform_flags(&mut probe_cmd);
