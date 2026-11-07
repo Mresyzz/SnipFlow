@@ -1,6 +1,6 @@
 [package]
 name = "snipflow"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 authors = ["Mresyzz <dev@snipflow.org>"]
 description = "Ultra-fast, local-first lossless video clipper & silence stripper powered by Rust and FFmpeg."
