@@ -50,9 +50,11 @@ jobs:
           node-version: 20
 
       - name: Install Frontend Dependencies & Build Dist
+        shell: bash
         run: |
-          npm --prefix ui install
-          npm --prefix ui run build
+          cd ui
+          npm install
+          npm run build
 
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
