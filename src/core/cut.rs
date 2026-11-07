@@ -1,20 +1,30 @@
 use std::path::Path;
 use std::process::Command;
+use serde::{Deserialize, Serialize};
 use crate::core::ffmpeg::{find_binary, run_command};
 use crate::error::{Result, SnipFlowError};
 
-/// Executes an instantaneous, zero-reencode lossless stream export.
-///
-/// # Arguments
-/// * `video_path` - Source video file path
-/// * `start` - Start timestamp in seconds
-/// * `end` - End timestamp in seconds
-/// * `output_path` - Target export destination path
-pub fn lossless_cut(
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum CutMode {
+    #[serde(rename = "stream_copy")]
+    StreamCopy,
+    #[serde(rename = "exact_frame")]
+    ExactFrame,
+}
+
+impl Default for CutMode {
+    fn default() -> Self {
+        Self::StreamCopy
+    }
+}
+
+/// Executes a media stream cut with either zero-reencode stream copy or frame-accurate fast encode.
+pub fn lossless_cut_with_mode(
     video_path: &Path,
     start: f64,
     end: f64,
     output_path: &Path,
+    mode: CutMode,
 ) -> Result<()> {
     if !video_path.exists() {
         return Err(SnipFlowError::FileNotFound(video_path.to_path_buf()));
@@ -34,27 +44,61 @@ pub fn lossless_cut(
     let ffmpeg_path = find_binary("ffmpeg")?;
     let mut cmd = Command::new(ffmpeg_path);
 
-    // Format timestamps with millisecond precision
     let start_str = format!("{:.3}", start);
     let duration_str = format!("{:.3}", end - start);
 
-    // Fast-seek (-ss before -i) with duration limit (-t) + stream copy (-c copy) + zero-timestamp reset
-    cmd.args([
-        "-y",
-        "-ss", &start_str,
-        "-t", &duration_str,
-        "-i",
-    ]);
-    cmd.arg(video_path);
-    cmd.args([
-        "-c", "copy",
-        "-map", "0",
-        "-avoid_negative_ts", "make_zero",
-    ]);
-    cmd.arg(output_path);
+    match mode {
+        CutMode::StreamCopy => {
+            // Instant demux/remux zero-reencode pass
+            cmd.args([
+                "-y",
+                "-ss", &start_str,
+                "-t", &duration_str,
+                "-i",
+            ]);
+            cmd.arg(video_path);
+            cmd.args([
+                "-c", "copy",
+                "-map", "0",
+                "-avoid_negative_ts", "make_zero",
+                "-fflags", "+genpts",
+            ]);
+            cmd.arg(output_path);
+        }
+        CutMode::ExactFrame => {
+            // Frame-exact ultra-fast render fallback for sub-frame boundaries
+            cmd.args([
+                "-y",
+                "-ss", &start_str,
+                "-i",
+            ]);
+            cmd.arg(video_path);
+            cmd.args([
+                "-t", &duration_str,
+                "-map", "0",
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-crf", "18",
+                "-c:a", "copy",
+                "-c:s", "copy",
+                "-avoid_negative_ts", "make_zero",
+            ]);
+            cmd.arg(output_path);
+        }
+    }
 
-    run_command(&mut cmd, "ffmpeg lossless cut")?;
+    run_command(&mut cmd, "ffmpeg media cut")?;
     Ok(())
+}
+
+/// Executes an instantaneous, zero-reencode lossless stream export.
+pub fn lossless_cut(
+    video_path: &Path,
+    start: f64,
+    end: f64,
+    output_path: &Path,
+) -> Result<()> {
+    lossless_cut_with_mode(video_path, start, end, output_path, CutMode::StreamCopy)
 }
 
 /// Helper function: Computes active speech spans by inverting silence intervals over total duration.
@@ -76,11 +120,12 @@ pub fn invert_silence(silence_intervals: &[(f64, f64)], total_duration: f64) -> 
     active
 }
 
-/// Merges multiple time intervals from source media into a single continuous file with zero re-encoding.
-pub fn seamless_merge(
+/// Merges multiple time intervals from source media into a single continuous file with specified cut mode.
+pub fn seamless_merge_with_mode(
     video_path: &Path,
     segments: &[(f64, f64)],
     output_path: &Path,
+    mode: CutMode,
 ) -> Result<()> {
     if !video_path.exists() {
         return Err(SnipFlowError::FileNotFound(video_path.to_path_buf()));
@@ -92,7 +137,7 @@ pub fn seamless_merge(
 
     if segments.len() == 1 {
         let (s, e) = segments[0];
-        return lossless_cut(video_path, s, e, output_path);
+        return lossless_cut_with_mode(video_path, s, e, output_path, mode);
     }
 
     let timestamp = std::time::SystemTime::now()
@@ -114,7 +159,7 @@ pub fn seamless_merge(
         }
         let clip_file_name = format!("chunk_{:03}.{}", idx, ext_str);
         let clip_path = tmp_dir.join(&clip_file_name);
-        lossless_cut(video_path, s, e, &clip_path)?;
+        lossless_cut_with_mode(video_path, s, e, &clip_path, mode)?;
         tmp_clips.push(clip_path);
         // Use relative filename to avoid path separator escaping issues
         concat_entries.push(format!("file '{clip_file_name}'"));
@@ -157,4 +202,13 @@ pub fn seamless_merge(
 
     res?;
     Ok(())
+}
+
+/// Merges multiple time intervals from source media into a single continuous file with zero re-encoding.
+pub fn seamless_merge(
+    video_path: &Path,
+    segments: &[(f64, f64)],
+    output_path: &Path,
+) -> Result<()> {
+    seamless_merge_with_mode(video_path, segments, output_path, CutMode::StreamCopy)
 }

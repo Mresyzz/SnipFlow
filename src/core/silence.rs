@@ -1,8 +1,93 @@
 use std::path::Path;
 use std::process::Command;
 use regex::Regex;
-use crate::core::ffmpeg::{find_binary, get_duration, run_command};
+use serde::{Deserialize, Serialize};
+use crate::core::ffmpeg::{find_binary, get_audio_streams, get_duration, run_command};
 use crate::error::{Result, SnipFlowError};
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct AudioVolumeProfile {
+    pub mean_volume_db: f64,
+    pub max_volume_db: f64,
+    pub recommended_silence_db: f64,
+}
+
+/// Parses volumedetect logs from FFmpeg stderr to compute audio profile and recommended noise floor.
+pub fn parse_volumedetect_output(stderr: &str) -> Result<AudioVolumeProfile> {
+    let re_mean = Regex::new(r"mean_volume:\s*(-?[0-9]+(?:\.[0-9]+)?)\s*dB")
+        .map_err(|e| SnipFlowError::ParseError(e.to_string()))?;
+    let re_max = Regex::new(r"max_volume:\s*(-?[0-9]+(?:\.[0-9]+)?)\s*dB")
+        .map_err(|e| SnipFlowError::ParseError(e.to_string()))?;
+
+    let mean_db = re_mean
+        .captures(stderr)
+        .and_then(|c| c.get(1))
+        .and_then(|m| m.as_str().parse::<f64>().ok())
+        .unwrap_or(-35.0);
+
+    let max_db = re_max
+        .captures(stderr)
+        .and_then(|c| c.get(1))
+        .and_then(|m| m.as_str().parse::<f64>().ok())
+        .unwrap_or(-3.0);
+
+    // Adaptive noise floor calibration formula:
+    // Human speech sits around max_db - 12dB; continuous fan/air background noise sits below mean_db.
+    // Setting threshold at mean_db - 6.5dB reliably catches pauses without cutting off quiet syllables.
+    let rec_db = (mean_db - 6.5).clamp(-50.0, -18.0);
+    let rounded_rec = (rec_db * 10.0).round() / 10.0;
+
+    Ok(AudioVolumeProfile {
+        mean_volume_db: (mean_db * 10.0).round() / 10.0,
+        max_volume_db: (max_db * 10.0).round() / 10.0,
+        recommended_silence_db: rounded_rec,
+    })
+}
+
+/// Analyzes audio stream volume distribution using FFmpeg volumedetect filter.
+pub fn probe_audio_volume(
+    video_path: &Path,
+    track_index: Option<usize>,
+) -> Result<AudioVolumeProfile> {
+    if !video_path.exists() {
+        return Err(SnipFlowError::FileNotFound(video_path.to_path_buf()));
+    }
+
+    let tracks = get_audio_streams(video_path)?;
+    if tracks.is_empty() {
+        return Ok(AudioVolumeProfile {
+            mean_volume_db: -90.0,
+            max_volume_db: -90.0,
+            recommended_silence_db: -30.0,
+        });
+    }
+
+    let ffmpeg_path = find_binary("ffmpeg")?;
+    let mut cmd = Command::new(ffmpeg_path);
+    let map_arg = format!("0:a:{}", track_index.unwrap_or(0));
+
+    cmd.args([
+        "-nostats",
+        "-hide_banner",
+        "-vn",
+        "-i",
+    ]);
+    cmd.arg(video_path);
+    cmd.args([
+        "-map",
+        &map_arg,
+        "-af",
+        "volumedetect",
+        "-f",
+        "null",
+        "-",
+    ]);
+
+    let output = run_command(&mut cmd, "ffmpeg volumedetect probe")?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    parse_volumedetect_output(&stderr)
+}
 
 /// Detects dead-air / silent intervals in an audio/video asset on a specific audio track.
 pub fn detect_silence_track(
@@ -13,6 +98,12 @@ pub fn detect_silence_track(
 ) -> Result<Vec<(f64, f64)>> {
     if !video_path.exists() {
         return Err(SnipFlowError::FileNotFound(video_path.to_path_buf()));
+    }
+
+    // Safety guard: if container has no audio streams, exit safely without crashing FFmpeg
+    let tracks = get_audio_streams(video_path)?;
+    if tracks.is_empty() {
+        return Ok(Vec::new());
     }
 
     if min_duration <= 0.0 {

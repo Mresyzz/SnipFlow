@@ -2,9 +2,10 @@ use std::path::PathBuf;
 use serde::Serialize;
 use tauri::command;
 use snipflow::{
-    detect_peak_highlights, detect_silence_track, find_binary, generate_waveform_peaks,
-    get_audio_streams, get_duration, get_internal_bin_dir, get_keyframes, invert_silence,
-    AudioStreamInfo,
+    check_keyframe_alignment, detect_peak_highlights, detect_silence_track, find_binary,
+    find_nearest_keyframe, generate_waveform_peaks, get_audio_streams, get_duration,
+    get_internal_bin_dir, get_keyframes, invert_silence, probe_audio_volume, validate_media_file,
+    AudioStreamInfo, AudioVolumeProfile, KeyframeAlignment, MediaContainerValidation,
 };
 
 #[derive(Serialize, Clone, Debug)]
@@ -26,6 +27,7 @@ pub struct MediaInspection {
     pub audio_tracks: Vec<AudioStreamInfo>,
     pub peak_highlights: Vec<f64>,
     pub waveform_peaks: Vec<f32>,
+    pub validation: MediaContainerValidation,
 }
 
 #[command]
@@ -71,6 +73,16 @@ pub fn check_environment_cmd() -> EnvironmentStatus {
 }
 
 #[command]
+pub async fn validate_media_container_cmd(file_path: String) -> Result<MediaContainerValidation, String> {
+    tokio::task::spawn_blocking(move || {
+        let path = PathBuf::from(&file_path);
+        validate_media_file(&path).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("Validation task failed: {e}"))?
+}
+
+#[command]
 pub async fn inspect_media_cmd(
     file_path: String,
     noise_db: Option<f64>,
@@ -83,16 +95,26 @@ pub async fn inspect_media_cmd(
             return Err(format!("File does not exist: {file_path}"));
         }
 
-        // 1. Probe total media duration
-        let duration = get_duration(&path).map_err(|e| e.to_string())?;
+        // 1. Preflight container validation
+        let validation = validate_media_file(&path).map_err(|e| e.to_string())?;
+        if !validation.is_valid {
+            return Err(validation.error_message.unwrap_or_else(|| "Invalid media container".to_string()));
+        }
 
-        // 2. Extract keyframes without decoding non-keyframes
-        let keyframes = get_keyframes(&path).map_err(|e| e.to_string())?;
+        // 2. Probe total media duration
+        let duration = if validation.duration > 0.0 {
+            validation.duration
+        } else {
+            get_duration(&path).map_err(|e| e.to_string())?
+        };
 
-        // 3. Audio tracks discovery
+        // 3. Extract keyframes without decoding non-keyframes
+        let keyframes = get_keyframes(&path).unwrap_or_default();
+
+        // 4. Audio tracks discovery
         let audio_tracks = get_audio_streams(&path).unwrap_or_default();
 
-        // 4. Audio silence detection, peak highlights and waveform peaks with silent video guard
+        // 5. Audio silence detection, peak highlights and waveform peaks with silent video guard
         let (silence_intervals, peak_highlights, waveform_peaks) = if !audio_tracks.is_empty() {
             let db = noise_db.unwrap_or(-30.0);
             let min_dur = min_silence_duration.unwrap_or(0.5);
@@ -104,7 +126,7 @@ pub async fn inspect_media_cmd(
             (Vec::new(), Vec::new(), Vec::new())
         };
 
-        // 5. Invert silence intervals to calculate clean active speech segments
+        // 6. Invert silence intervals to calculate clean active speech segments
         let active_segments = if !silence_intervals.is_empty() {
             invert_silence(&silence_intervals, duration)
         } else {
@@ -120,10 +142,40 @@ pub async fn inspect_media_cmd(
             audio_tracks,
             peak_highlights,
             waveform_peaks,
+            validation,
         })
     })
     .await
     .map_err(|e| format!("Task execution failed: {e}"))?
+}
+
+#[command]
+pub async fn calibrate_silence_threshold_cmd(
+    file_path: String,
+    track_index: Option<usize>,
+) -> Result<AudioVolumeProfile, String> {
+    tokio::task::spawn_blocking(move || {
+        let path = PathBuf::from(&file_path);
+        probe_audio_volume(&path, track_index).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("Audio calibration failed: {e}"))?
+}
+
+#[command]
+pub fn check_keyframe_alignment_cmd(
+    keyframes: Vec<f64>,
+    target_sec: f64,
+) -> Option<KeyframeAlignment> {
+    check_keyframe_alignment(&keyframes, target_sec)
+}
+
+#[command]
+pub fn find_nearest_keyframe_cmd(
+    keyframes: Vec<f64>,
+    target_sec: f64,
+) -> Option<f64> {
+    find_nearest_keyframe(&keyframes, target_sec)
 }
 
 #[command]

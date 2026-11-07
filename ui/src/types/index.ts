@@ -1,3 +1,5 @@
+export type CutMode = 'stream_copy' | 'exact_frame';
+
 export interface EnvironmentStatus {
   ffmpeg_available: boolean;
   ffprobe_available: boolean;
@@ -14,6 +16,32 @@ export interface AudioStreamInfo {
   title?: string;
 }
 
+export interface AudioVolumeProfile {
+  mean_volume_db: number;
+  max_volume_db: number;
+  recommended_silence_db: number;
+}
+
+export interface KeyframeAlignment {
+  target_sec: number;
+  nearest_pts: number;
+  diff_ms: number;
+  is_aligned: boolean;
+}
+
+export interface MediaContainerValidation {
+  is_valid: boolean;
+  format_name: string;
+  duration: number;
+  has_video: boolean;
+  has_audio: boolean;
+  video_codec?: string;
+  audio_codec?: string;
+  width?: number;
+  height?: number;
+  error_message?: string;
+}
+
 export interface MediaInspection {
   path: string;
   duration: number;
@@ -23,6 +51,7 @@ export interface MediaInspection {
   audio_tracks: AudioStreamInfo[];
   peak_highlights: number[];
   waveform_peaks: number[];
+  validation?: MediaContainerValidation;
 }
 
 export interface CutResult {
@@ -31,6 +60,7 @@ export interface CutResult {
   start: number;
   end: number;
   duration: number;
+  mode?: CutMode;
 }
 
 export interface BatchExportResult {

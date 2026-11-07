@@ -11,8 +11,9 @@ import {
   Sparkles,
   Zap,
   FolderOpen,
+  Activity,
 } from "lucide-react";
-import { AudioStreamInfo } from "../types";
+import { AudioStreamInfo, CutMode } from "../types";
 
 interface ToolbarProps {
   inPoint: number | null;
@@ -23,6 +24,7 @@ interface ToolbarProps {
   noiseDb: number;
   zoomLevel: number;
   isExporting: boolean;
+  isCalibrating: boolean;
   lastExportElapsedMs: number | null;
   silenceCount: number;
   audioTracks: AudioStreamInfo[];
@@ -30,6 +32,9 @@ interface ToolbarProps {
   highlightCount: number;
   activeSegmentCount: number;
   customOutputDir: string | null;
+  cutMode: CutMode;
+  onToggleCutMode: () => void;
+  onAutoCalibrateNoiseFloor: () => void;
   onSelectTrack: (trackIndex: number) => void;
   onToggleMagneticSnap: () => void;
   onNoiseDbChange: (db: number) => void;
@@ -55,6 +60,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   noiseDb,
   zoomLevel,
   isExporting,
+  isCalibrating,
   lastExportElapsedMs,
   silenceCount,
   audioTracks,
@@ -62,6 +68,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   highlightCount,
   activeSegmentCount,
   customOutputDir,
+  cutMode,
+  onToggleCutMode,
+  onAutoCalibrateNoiseFloor,
   onSelectTrack,
   onToggleMagneticSnap,
   onNoiseDbChange,
@@ -80,10 +89,25 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   const selectionDuration =
     inPoint !== null && outPoint !== null ? Math.max(0, outPoint - inPoint) : null;
 
-  const isKeyframeAligned =
-    inPoint !== null &&
-    keyframes.length > 0 &&
-    keyframes.some((kf) => Math.abs(kf - inPoint) < 0.05);
+  // Calculate millisecond drift relative to nearest keyframe for In-point
+  let nearestKf: number | null = null;
+  let driftMs: number | null = null;
+  let isKeyframeAligned = false;
+
+  if (inPoint !== null && keyframes.length > 0) {
+    let minDiff = Infinity;
+    for (const kf of keyframes) {
+      const diff = Math.abs(kf - inPoint);
+      if (diff < minDiff) {
+        minDiff = diff;
+        nearestKf = kf;
+      }
+    }
+    if (nearestKf !== null) {
+      driftMs = (inPoint - nearestKf) * 1000.0;
+      isKeyframeAligned = Math.abs(driftMs) < 18.0;
+    }
+  }
 
   const formatSec = (s: number | null) => (s !== null ? `${s.toFixed(2)}s` : "--");
 
@@ -131,8 +155,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           </span>
         )}
 
-        {/* I-Frame Alignment Status LED (Native SVG Indicator) */}
-        {inPoint !== null && keyframes.length > 0 && (
+        {/* I-Frame Alignment Status LED with exact millisecond drift */}
+        {inPoint !== null && keyframes.length > 0 && driftMs !== null && (
           <button
             onClick={onSnapInToKeyframe}
             className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border transition cursor-pointer ${
@@ -142,14 +166,18 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             }`}
             title={
               isKeyframeAligned
-                ? "Lossless boundary aligned to I-frame"
-                : "Unaligned boundary. Click to snap to nearest I-frame"
+                ? "In-point is accurately aligned to physical GOP I-frame (zero demux offset)"
+                : `Drift from GOP boundary: ${driftMs > 0 ? "+" : ""}${driftMs.toFixed(0)}ms. Click to snap to nearest I-frame`
             }
           >
             <svg className="w-1.5 h-1.5 fill-current" viewBox="0 0 6 6">
               <circle cx="3" cy="3" r="3" />
             </svg>
-            <span>{isKeyframeAligned ? "I-FRAME" : "SNAP I-FRAME"}</span>
+            <span>
+              {isKeyframeAligned
+                ? "I-FRAME"
+                : `SNAP (${driftMs > 0 ? "+" : ""}${driftMs.toFixed(0)}ms)`}
+            </span>
           </button>
         )}
 
@@ -175,7 +203,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </div>
       </div>
 
-      {/* Middle: Audio Track & Silence Threshold */}
+      {/* Middle: Audio Track & Silence Threshold & Auto-Calibration */}
       <div className="flex items-center gap-2">
         {highlightCount > 0 && (
           <button
@@ -205,6 +233,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           </div>
         )}
 
+        {/* Silence Threshold & Auto-Calibration */}
         <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
           <span className="text-zinc-500">THRESH</span>
           <span className="text-zinc-300 w-11 text-right">{noiseDb}dB</span>
@@ -217,6 +246,17 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             onChange={(e) => onNoiseDbChange(Number(e.target.value))}
             className="w-16 h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-zinc-400"
           />
+
+          {/* Auto Calibration Button */}
+          <button
+            onClick={onAutoCalibrateNoiseFloor}
+            disabled={isCalibrating}
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-850 hover:bg-zinc-800 text-zinc-300 border border-zinc-750 text-[10px] cursor-pointer disabled:opacity-40"
+            title="Analyze background noise floor via volumedetect and calculate optimal threshold"
+          >
+            <Activity className={`w-2.5 h-2.5 ${isCalibrating ? "animate-spin text-cyan-400" : "text-zinc-400"}`} />
+            <span>{isCalibrating ? "CAL..." : "AUTO CAL"}</span>
+          </button>
         </div>
 
         <button
@@ -229,8 +269,25 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         </button>
       </div>
 
-      {/* Right: Export Actions */}
+      {/* Right: Export Engine Toggle & Actions */}
       <div className="flex items-center gap-1.5">
+        {/* Dual-Engine Mode Switcher */}
+        <button
+          onClick={onToggleCutMode}
+          className={`px-2 py-1 rounded text-[10px] font-bold border transition cursor-pointer ${
+            cutMode === "stream_copy"
+              ? "bg-zinc-850 text-cyan-400 border-cyan-800"
+              : "bg-purple-950/30 text-purple-300 border-purple-800 hover:bg-purple-900/40"
+          }`}
+          title={
+            cutMode === "stream_copy"
+              ? "Current: STREAM COPY (Zero re-encoding, instant cut snapped to I-frames). Click to switch to EXACT FRAME."
+              : "Current: EXACT FRAME (Ultra-fast smart render, sub-frame boundary precision). Click to switch to STREAM COPY."
+          }
+        >
+          {cutMode === "stream_copy" ? "STREAM COPY" : "EXACT FRAME"}
+        </button>
+
         {/* Destination folder picker */}
         <button
           onClick={onSelectOutputDir}
@@ -281,7 +338,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           onClick={onExport}
           disabled={isExporting}
           className="flex items-center gap-1.5 px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-zinc-950 font-bold text-[11px] transition cursor-pointer disabled:opacity-40"
-          title="Lossless Export Active In/Out Range (Enter)"
+          title="Export Active Range (Enter)"
         >
           {isExporting ? (
             <>

@@ -11,6 +11,8 @@ import {
   SeamlessMergeResult,
   EnvironmentStatus,
   AudioStreamInfo,
+  AudioVolumeProfile,
+  CutMode,
 } from "./types";
 import { AlertTriangle, FolderOpen, Play, X, Scissors } from "lucide-react";
 
@@ -39,6 +41,10 @@ export const App: React.FC = () => {
   const [noiseDb, setNoiseDb] = useState<number>(-30);
   const [zoomLevel, setZoomLevel] = useState<number>(1);
   const [customOutputDir, setCustomOutputDir] = useState<string | null>(null);
+
+  // Dual-Engine and Auto-Calibration states
+  const [cutMode, setCutMode] = useState<CutMode>("stream_copy");
+  const [isCalibrating, setIsCalibrating] = useState<boolean>(false);
 
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [lastExportElapsedMs, setLastExportElapsedMs] = useState<number | null>(null);
@@ -101,11 +107,17 @@ export const App: React.FC = () => {
             setInPoint(0);
             setOutPoint(Math.min(res.duration, 10));
           }
+
+          const audioNote =
+            res.audio_tracks.length === 0
+              ? " (SILENT VIDEO: NO AUDIO TRACKS)"
+              : ` · ${res.audio_tracks.length} TRACKS`;
+
           setStatusMessage(
-            `PARSED: ${res.keyframes.length} I-FRAMES · ${res.silence_intervals.length} SILENCES · ${res.audio_tracks.length} TRACKS`
+            `PARSED: ${res.keyframes.length} I-FRAMES · ${res.silence_intervals.length} SILENCES${audioNote}`
           );
         } else {
-          // Browser environment guard
+          // Browser environment fallback
           if (blobUrl) setVideoUrl(blobUrl);
           setStatusMessage("RUNNING IN BROWSER: DESKTOP TAURI RUNTIME REQUIRED FOR STREAM DEMUXING");
         }
@@ -227,6 +239,55 @@ export const App: React.FC = () => {
     }
   };
 
+  // Auto calibrate background noise floor using FFmpeg volumedetect
+  const handleAutoCalibrateNoiseFloor = useCallback(async () => {
+    if (!filePath) return;
+    setIsCalibrating(true);
+    setStatusMessage("PROBING AUDIO VOLUME PROFILE (volumedetect)...");
+
+    try {
+      if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const profile = await invoke<AudioVolumeProfile>("calibrate_silence_threshold_cmd", {
+          filePath,
+          trackIndex: selectedTrackIndex,
+        });
+
+        setNoiseDb(profile.recommended_silence_db);
+
+        const silences = await invoke<[number, number][]>("rescan_silence_cmd", {
+          filePath,
+          noiseDb: profile.recommended_silence_db,
+          minSilenceDuration: 0.5,
+          trackIndex: selectedTrackIndex,
+        });
+        setSilenceIntervals(silences);
+
+        setStatusMessage(
+          `AUTO-CALIBRATED: MEAN ${profile.mean_volume_db}dB · MAX ${profile.max_volume_db}dB · REC ${profile.recommended_silence_db}dB`
+        );
+      }
+    } catch (e) {
+      console.error("Auto calibration failed", e);
+      setStatusMessage(`CALIBRATION FAILED: ${e}`);
+    } finally {
+      setIsCalibrating(false);
+    }
+  }, [filePath, selectedTrackIndex]);
+
+  // Toggle Cut Engine Mode
+  const handleToggleCutMode = useCallback(() => {
+    setCutMode((prev) => {
+      const next = prev === "stream_copy" ? "exact_frame" : "stream_copy";
+      setStatusMessage(
+        next === "stream_copy"
+          ? "MODE: STREAM COPY (Instant zero-reencoding, snapped to GOP I-frames)"
+          : "MODE: EXACT FRAME (Ultra-fast smart render, sub-frame boundary precision)"
+      );
+      return next;
+    });
+  }, []);
+
   // Select first active speech segment
   const handleStripSilence = useCallback(() => {
     if (activeSegments.length > 0) {
@@ -254,7 +315,7 @@ export const App: React.FC = () => {
     setStatusMessage(`REMOVED SEGMENT #${indexToRemove + 1}`);
   }, []);
 
-  // Single lossless cut export
+  // Single cut export
   const handleExport = useCallback(async () => {
     if (!filePath) return;
     const start = inPoint ?? 0;
@@ -266,7 +327,11 @@ export const App: React.FC = () => {
     }
 
     setIsExporting(true);
-    setStatusMessage("EXECUTING STREAM COPY (-c copy)...");
+    setStatusMessage(
+      cutMode === "stream_copy"
+        ? "EXECUTING STREAM COPY (-c copy)..."
+        : "EXECUTING EXACT FAST RENDER (libx264 ultrafast)..."
+    );
 
     const defaultOutput = customOutputDir
       ? `${customOutputDir}/${filePath.split(/[/\\]/).pop()?.replace(/(\.[^.]+)$/, "_cut$1")}`
@@ -280,10 +345,13 @@ export const App: React.FC = () => {
           start,
           end,
           outputPath: defaultOutput,
+          cutMode,
         });
 
         setLastExportElapsedMs(res.elapsed_ms);
-        setStatusMessage(`EXPORT OK: ${res.elapsed_ms.toFixed(1)}ms -> ${res.output_path}`);
+        setStatusMessage(
+          `EXPORT OK [${cutMode.toUpperCase()}]: ${res.elapsed_ms.toFixed(1)}ms -> ${res.output_path}`
+        );
       } else {
         setStatusMessage("DESKTOP TAURI RUNTIME REQUIRED FOR STREAM EXPORT");
       }
@@ -292,14 +360,14 @@ export const App: React.FC = () => {
     } finally {
       setIsExporting(false);
     }
-  }, [filePath, inPoint, outPoint, duration, customOutputDir]);
+  }, [filePath, inPoint, outPoint, duration, customOutputDir, cutMode]);
 
   // Batch multi-clip export
   const handleBatchExport = useCallback(async () => {
     if (!filePath || activeSegments.length === 0) return;
 
     setIsExporting(true);
-    setStatusMessage(`BATCH EXPORTING ${activeSegments.length} CLIPS...`);
+    setStatusMessage(`BATCH EXPORTING ${activeSegments.length} CLIPS [${cutMode.toUpperCase()}]...`);
 
     try {
       if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
@@ -308,11 +376,12 @@ export const App: React.FC = () => {
           sourcePath: filePath,
           segments: activeSegments,
           outputDirOverride: customOutputDir,
+          cutMode,
         });
 
         setLastExportElapsedMs(res.total_elapsed_ms);
         setStatusMessage(
-          `BATCH OK: ${res.exported_count} CLIPS IN ${res.total_elapsed_ms.toFixed(1)}ms -> ${res.output_dir}`
+          `BATCH OK [${cutMode.toUpperCase()}]: ${res.exported_count} CLIPS IN ${res.total_elapsed_ms.toFixed(1)}ms -> ${res.output_dir}`
         );
       } else {
         setStatusMessage("DESKTOP TAURI RUNTIME REQUIRED FOR BATCH EXPORT");
@@ -322,14 +391,14 @@ export const App: React.FC = () => {
     } finally {
       setIsExporting(false);
     }
-  }, [filePath, activeSegments, customOutputDir]);
+  }, [filePath, activeSegments, customOutputDir, cutMode]);
 
-  // Seamless merge export (Zero re-encode continuous file)
+  // Seamless merge export
   const handleSeamlessMerge = useCallback(async () => {
     if (!filePath || activeSegments.length === 0) return;
 
     setIsExporting(true);
-    setStatusMessage(`SEAMLESS CONCATENATING ${activeSegments.length} ACTIVE SEGMENTS...`);
+    setStatusMessage(`SEAMLESS CONCATENATING ${activeSegments.length} ACTIVE SEGMENTS [${cutMode.toUpperCase()}]...`);
 
     try {
       if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
@@ -340,11 +409,12 @@ export const App: React.FC = () => {
           outputPathOverride: customOutputDir
             ? `${customOutputDir}/${filePath.split(/[/\\]/).pop()?.replace(/(\.[^.]+)$/, "_seamless_clean$1")}`
             : null,
+          cutMode,
         });
 
         setLastExportElapsedMs(res.total_elapsed_ms);
         setStatusMessage(
-          `SEAMLESS MERGE OK: ${res.merged_segments_count} SEGMENTS IN ${res.total_elapsed_ms.toFixed(1)}ms -> ${res.output_path}`
+          `SEAMLESS MERGE OK [${cutMode.toUpperCase()}]: ${res.merged_segments_count} SEGMENTS IN ${res.total_elapsed_ms.toFixed(1)}ms -> ${res.output_path}`
         );
       } else {
         setStatusMessage("DESKTOP TAURI RUNTIME REQUIRED FOR SEAMLESS MERGE");
@@ -354,7 +424,7 @@ export const App: React.FC = () => {
     } finally {
       setIsExporting(false);
     }
-  }, [filePath, activeSegments, customOutputDir]);
+  }, [filePath, activeSegments, customOutputDir, cutMode]);
 
   // Keyboard shortcuts with in/out boundary sanity
   useShortcuts({
@@ -415,7 +485,9 @@ export const App: React.FC = () => {
         <div className="flex items-center gap-3 text-[10px] text-zinc-500 font-mono">
           <span>ENGINE: RUST/FFMPEG</span>
           <span>·</span>
-          <span>PASSTHROUGH: COPY</span>
+          <span className={cutMode === "stream_copy" ? "text-cyan-400 font-semibold" : "text-purple-400 font-semibold"}>
+            MODE: {cutMode === "stream_copy" ? "STREAM COPY (PASSTHROUGH)" : "EXACT FRAME (SMART RENDER)"}
+          </span>
         </div>
       </header>
 
@@ -465,7 +537,7 @@ export const App: React.FC = () => {
 
             {/* Active Segments Ribbon */}
             {activeSegments.length > 0 && (
-              <div className="w-full shrink-0 flex items-center gap-1.5 overflow-x-auto py-1 px-1 bg-zinc-950 border border-zinc-850/80 rounded font-mono text-[10px] custom-scrollbar">
+              <div className="w-full shrink-0 flex items-center gap-1.5 overflow-x-auto py-1 px-1 bg-zinc-950 border border-zinc-855/80 rounded font-mono text-[10px] custom-scrollbar">
                 <div className="flex items-center gap-1 text-zinc-500 shrink-0 px-1.5">
                   <Scissors className="w-3 h-3 text-zinc-500" />
                   <span>CLIPS ({activeSegments.length}):</span>
@@ -514,6 +586,7 @@ export const App: React.FC = () => {
                 noiseDb={noiseDb}
                 zoomLevel={zoomLevel}
                 isExporting={isExporting}
+                isCalibrating={isCalibrating}
                 lastExportElapsedMs={lastExportElapsedMs}
                 silenceCount={silenceIntervals.length}
                 audioTracks={audioTracks}
@@ -521,6 +594,9 @@ export const App: React.FC = () => {
                 highlightCount={peakHighlights.length}
                 activeSegmentCount={activeSegments.length}
                 customOutputDir={customOutputDir}
+                cutMode={cutMode}
+                onToggleCutMode={handleToggleCutMode}
+                onAutoCalibrateNoiseFloor={handleAutoCalibrateNoiseFloor}
                 onSelectTrack={handleSelectTrack}
                 onToggleMagneticSnap={() => setIsMagneticSnapEnabled(!isMagneticSnapEnabled)}
                 onNoiseDbChange={handleNoiseDbChange}

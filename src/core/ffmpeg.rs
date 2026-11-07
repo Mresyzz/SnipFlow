@@ -212,3 +212,191 @@ pub fn get_audio_streams(video_path: &Path) -> Result<Vec<AudioStreamInfo>> {
 
     Ok(tracks)
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MediaContainerValidation {
+    pub is_valid: bool,
+    pub format_name: String,
+    pub duration: f64,
+    pub has_video: bool,
+    pub has_audio: bool,
+    pub video_codec: Option<String>,
+    pub audio_codec: Option<String>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub error_message: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct FFprobeFormatSection {
+    format_name: Option<String>,
+    duration: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct FFprobeStreamSection {
+    codec_type: Option<String>,
+    codec_name: Option<String>,
+    width: Option<u32>,
+    height: Option<u32>,
+}
+
+#[derive(Deserialize)]
+struct FFprobeValidationJson {
+    format: Option<FFprobeFormatSection>,
+    streams: Option<Vec<FFprobeStreamSection>>,
+}
+
+/// Performs preflight inspection to validate container integrity and stream health.
+pub fn validate_media_file(video_path: &Path) -> Result<MediaContainerValidation> {
+    if !video_path.exists() {
+        return Ok(MediaContainerValidation {
+            is_valid: false,
+            format_name: String::new(),
+            duration: 0.0,
+            has_video: false,
+            has_audio: false,
+            video_codec: None,
+            audio_codec: None,
+            width: None,
+            height: None,
+            error_message: Some(format!("File does not exist: {}", video_path.display())),
+        });
+    }
+
+    if let Ok(metadata) = std::fs::metadata(video_path) {
+        if metadata.len() == 0 {
+            return Ok(MediaContainerValidation {
+                is_valid: false,
+                format_name: String::new(),
+                duration: 0.0,
+                has_video: false,
+                has_audio: false,
+                video_codec: None,
+                audio_codec: None,
+                width: None,
+                height: None,
+                error_message: Some("File is empty (0 bytes).".to_string()),
+            });
+        }
+    }
+
+    let ffprobe_path = match find_binary("ffprobe") {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(MediaContainerValidation {
+                is_valid: false,
+                format_name: String::new(),
+                duration: 0.0,
+                has_video: false,
+                has_audio: false,
+                video_codec: None,
+                audio_codec: None,
+                width: None,
+                height: None,
+                error_message: Some(format!("ffprobe binary not available: {e}")),
+            });
+        }
+    };
+
+    let mut cmd = Command::new(ffprobe_path);
+    cmd.args([
+        "-v", "error",
+        "-show_format",
+        "-show_streams",
+        "-of", "json",
+    ]);
+    cmd.arg(video_path);
+
+    let output = match run_command(&mut cmd, "ffprobe preflight validation") {
+        Ok(o) => o,
+        Err(e) => {
+            return Ok(MediaContainerValidation {
+                is_valid: false,
+                format_name: String::new(),
+                duration: 0.0,
+                has_video: false,
+                has_audio: false,
+                video_codec: None,
+                audio_codec: None,
+                width: None,
+                height: None,
+                error_message: Some(format!("Corrupt or unsupported container format: {e}")),
+            });
+        }
+    };
+
+    let json_str = String::from_utf8_lossy(&output.stdout);
+    let parsed: FFprobeValidationJson = match serde_json::from_str(&json_str) {
+        Ok(p) => p,
+        Err(e) => {
+            return Ok(MediaContainerValidation {
+                is_valid: false,
+                format_name: String::new(),
+                duration: 0.0,
+                has_video: false,
+                has_audio: false,
+                video_codec: None,
+                audio_codec: None,
+                width: None,
+                height: None,
+                error_message: Some(format!("Malformed metadata stream: {e}")),
+            });
+        }
+    };
+
+    let format_name = parsed
+        .format
+        .as_ref()
+        .and_then(|f| f.format_name.clone())
+        .unwrap_or_else(|| "unknown".to_string());
+
+    let duration = parsed
+        .format
+        .as_ref()
+        .and_then(|f| f.duration.as_ref())
+        .and_then(|d| d.parse::<f64>().ok())
+        .unwrap_or(0.0);
+
+    let mut has_video = false;
+    let mut has_audio = false;
+    let mut video_codec = None;
+    let mut audio_codec = None;
+    let mut width = None;
+    let mut height = None;
+
+    if let Some(streams) = parsed.streams {
+        for s in streams {
+            match s.codec_type.as_deref() {
+                Some("video") if !has_video => {
+                    has_video = true;
+                    video_codec = s.codec_name;
+                    width = s.width;
+                    height = s.height;
+                }
+                Some("audio") if !has_audio => {
+                    has_audio = true;
+                    audio_codec = s.codec_name;
+                }
+                _ => {}
+            }
+        }
+    }
+
+    Ok(MediaContainerValidation {
+        is_valid: has_video || has_audio,
+        format_name,
+        duration,
+        has_video,
+        has_audio,
+        video_codec,
+        audio_codec,
+        width,
+        height,
+        error_message: if has_video || has_audio {
+            None
+        } else {
+            Some("No valid audio or video tracks detected inside container.".to_string())
+        },
+    })
+}

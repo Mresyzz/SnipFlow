@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use serde::Serialize;
 use tauri::command;
-use snipflow::{lossless_cut, seamless_merge};
+use snipflow::{lossless_cut_with_mode, seamless_merge_with_mode, CutMode};
 
 #[derive(Serialize, Clone, Debug)]
 pub struct CutResult {
@@ -10,6 +10,7 @@ pub struct CutResult {
     pub start: f64,
     pub end: f64,
     pub duration: f64,
+    pub mode: CutMode,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -26,13 +27,15 @@ pub async fn lossless_cut_cmd(
     start: f64,
     end: f64,
     output_path: String,
+    cut_mode: Option<CutMode>,
 ) -> Result<CutResult, String> {
     tokio::task::spawn_blocking(move || {
         let src = PathBuf::from(&source_path);
         let dst = PathBuf::from(&output_path);
+        let mode = cut_mode.unwrap_or_default();
 
         let t0 = std::time::Instant::now();
-        lossless_cut(&src, start, end, &dst).map_err(|e| e.to_string())?;
+        lossless_cut_with_mode(&src, start, end, &dst, mode).map_err(|e| e.to_string())?;
         let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
         Ok(CutResult {
@@ -41,6 +44,7 @@ pub async fn lossless_cut_cmd(
             start,
             end,
             duration: end - start,
+            mode,
         })
     })
     .await
@@ -52,6 +56,7 @@ pub async fn batch_export_segments_cmd(
     source_path: String,
     segments: Vec<(f64, f64)>,
     output_dir_override: Option<String>,
+    cut_mode: Option<CutMode>,
 ) -> Result<BatchExportResult, String> {
     tokio::task::spawn_blocking(move || {
         let src = PathBuf::from(&source_path);
@@ -59,6 +64,7 @@ pub async fn batch_export_segments_cmd(
             return Err(format!("Source media not found: {source_path}"));
         }
 
+        let mode = cut_mode.unwrap_or_default();
         let out_dir = match output_dir_override {
             Some(d) => PathBuf::from(d),
             None => {
@@ -82,7 +88,7 @@ pub async fn batch_export_segments_cmd(
             let filename = format!("clip_{:03}.{}", idx + 1, ext_str);
             let clip_path = out_dir.join(&filename);
 
-            lossless_cut(&src, start, end, &clip_path).map_err(|e| e.to_string())?;
+            lossless_cut_with_mode(&src, start, end, &clip_path, mode).map_err(|e| e.to_string())?;
             created_clips.push(clip_path.to_string_lossy().to_string());
         }
 
@@ -111,6 +117,7 @@ pub async fn export_seamless_merge_cmd(
     source_path: String,
     segments: Vec<(f64, f64)>,
     output_path_override: Option<String>,
+    cut_mode: Option<CutMode>,
 ) -> Result<SeamlessMergeResult, String> {
     tokio::task::spawn_blocking(move || {
         let src = PathBuf::from(&source_path);
@@ -118,6 +125,7 @@ pub async fn export_seamless_merge_cmd(
             return Err(format!("Source media not found: {source_path}"));
         }
 
+        let mode = cut_mode.unwrap_or_default();
         let dst = match output_path_override {
             Some(p) => PathBuf::from(p),
             None => {
@@ -131,7 +139,7 @@ pub async fn export_seamless_merge_cmd(
         };
 
         let t0 = std::time::Instant::now();
-        seamless_merge(&src, &segments, &dst).map_err(|e| e.to_string())?;
+        seamless_merge_with_mode(&src, &segments, &dst, mode).map_err(|e| e.to_string())?;
         let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
         Ok(SeamlessMergeResult {

@@ -62,4 +62,4 @@ jobs:
         run: cargo check --target ${{ matrix.target }}
 
       - name: Run Core Unit Tests
-        run: cargo test --lib --target ${{ matrix.target }}
+        run: cargo test --all-targets --target ${{ matrix.target }}
