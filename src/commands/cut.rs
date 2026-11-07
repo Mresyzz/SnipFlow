@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use serde::Serialize;
 use tauri::command;
-use crate::lossless_cut;
+use snipflow::{lossless_cut, seamless_merge};
 
 #[derive(Serialize, Clone, Debug)]
 pub struct CutResult {
@@ -131,7 +131,7 @@ pub async fn export_seamless_merge_cmd(
         };
 
         let t0 = std::time::Instant::now();
-        crate::seamless_merge(&src, &segments, &dst).map_err(|e| e.to_string())?;
+        seamless_merge(&src, &segments, &dst).map_err(|e| e.to_string())?;
         let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
         Ok(SeamlessMergeResult {

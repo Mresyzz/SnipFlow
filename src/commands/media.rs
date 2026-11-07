@@ -1,10 +1,11 @@
 use std::path::PathBuf;
 use serde::Serialize;
 use tauri::command;
-use crate::core::ffmpeg::{find_binary, get_audio_streams, get_internal_bin_dir, AudioStreamInfo};
-use crate::core::highlight::detect_peak_highlights;
-use crate::core::waveform::generate_waveform_peaks;
-use crate::{detect_silence_track, get_duration, get_keyframes, invert_silence};
+use snipflow::{
+    detect_peak_highlights, detect_silence_track, find_binary, generate_waveform_peaks,
+    get_audio_streams, get_duration, get_internal_bin_dir, get_keyframes, invert_silence,
+    AudioStreamInfo,
+};
 
 #[derive(Serialize, Clone, Debug)]
 pub struct EnvironmentStatus {
