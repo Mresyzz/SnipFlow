@@ -1,4 +1,4 @@
-import React, { useRef, useEffect } from "react";
+import React, { useRef, useEffect, useState } from "react";
 import { Play, Pause, Volume2, VolumeX, Maximize2, SkipBack, SkipForward } from "lucide-react";
 
 interface VideoPlayerProps {
@@ -19,7 +19,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onTogglePlay,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const [isMuted, setIsMuted] = React.useState(false);
+  const [isMuted, setIsMuted] = useState(false);
 
   useEffect(() => {
     const video = videoRef.current;
@@ -32,14 +32,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [isPlaying]);
 
-  // Synchronize external seek into video element with sub-frame precision
+  // Synchronize external seek with sub-frame precision
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
 
     const diff = Math.abs(video.currentTime - currentTime);
-    // When paused, frame-accurate seeking (threshold: 0.005s = 5ms)
-    // When playing, allow video to clock naturally unless large seek jump occurs
     const threshold = isPlaying ? 0.25 : 0.005;
 
     if (diff > threshold) {
@@ -53,17 +51,19 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   };
 
-  const formatTime = (seconds: number) => {
-    const mins = Math.floor(seconds / 60);
+  const formatSMPTETimecode = (seconds: number) => {
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
     const secs = Math.floor(seconds % 60);
-    const ms = Math.floor((seconds % 1) * 100);
-    return `${mins.toString().padStart(2, "0")}:${secs
+    const ms = Math.floor((seconds % 1) * 1000);
+    return `${hrs.toString().padStart(2, "0")}:${mins.toString().padStart(2, "0")}:${secs
       .toString()
-      .padStart(2, "0")}.${ms.toString().padStart(2, "0")}`;
+      .padStart(2, "0")}.${ms.toString().padStart(3, "0")}`;
   };
 
   return (
-    <div className="relative w-full h-full bg-black/95 rounded-xl overflow-hidden flex flex-col items-center justify-center border border-dark-800 shadow-2xl group">
+    <div className="relative w-full h-full bg-black rounded border border-zinc-850 overflow-hidden flex flex-col items-center justify-center select-none group">
+      {/* Video Viewport */}
       <video
         ref={videoRef}
         src={src}
@@ -74,17 +74,17 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         playsInline
       />
 
-      {/* Floating Transport Bar */}
-      <div className="absolute bottom-3 left-4 right-4 flex items-center justify-between px-4 py-2 bg-dark-900/85 backdrop-blur-md rounded-lg border border-dark-800/80 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-        <div className="flex items-center gap-2">
-          {/* Step Backward 1 Frame */}
+      {/* Embedded Studio Transport Bar (Compact 32px) */}
+      <div className="absolute bottom-0 left-0 right-0 h-8 px-3 bg-zinc-950/90 border-t border-zinc-850 flex items-center justify-between font-mono text-xs opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex items-center gap-1">
+          {/* Step Back 1 Frame */}
           <button
             onClick={(e) => {
               e.stopPropagation();
               onTimeUpdate(Math.max(0, currentTime - 0.04));
             }}
             title="Step Back 1 Frame (Left Arrow)"
-            className="p-1.5 rounded-md hover:bg-dark-800 text-neutral-400 hover:text-neutral-200 transition"
+            className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-850 transition"
           >
             <SkipBack className="w-3.5 h-3.5" />
           </button>
@@ -95,10 +95,10 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               e.stopPropagation();
               onTogglePlay();
             }}
-            title="Toggle Play (Space)"
-            className="p-1.5 rounded-md hover:bg-dark-800 text-neutral-200 hover:text-cyan-400 transition"
+            title="Play / Pause (Space)"
+            className="p-1 rounded text-zinc-200 hover:text-cyan-400 hover:bg-zinc-850 transition"
           >
-            {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
+            {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
           </button>
 
           {/* Step Forward 1 Frame */}
@@ -108,39 +108,50 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               onTimeUpdate(Math.min(duration, currentTime + 0.04));
             }}
             title="Step Forward 1 Frame (Right Arrow)"
-            className="p-1.5 rounded-md hover:bg-dark-800 text-neutral-400 hover:text-neutral-200 transition"
+            className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-850 transition"
           >
             <SkipForward className="w-3.5 h-3.5" />
           </button>
 
-          {/* Audio Mute */}
+          <div className="h-3 w-px bg-zinc-800 mx-1.5" />
+
+          {/* Timecode readout */}
+          <div className="flex items-center gap-2 text-[11px]">
+            <span className="text-zinc-100 font-semibold tracking-wider">
+              {formatSMPTETimecode(currentTime)}
+            </span>
+            <span className="text-zinc-600">/</span>
+            <span className="text-zinc-500">{formatSMPTETimecode(duration)}</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2">
+          {/* Mute button */}
           <button
             onClick={(e) => {
               e.stopPropagation();
               setIsMuted(!isMuted);
             }}
-            className="p-1.5 rounded-md hover:bg-dark-800 text-neutral-400 hover:text-neutral-200 transition"
+            className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850 transition"
+            title={isMuted ? "Unmute" : "Mute"}
           >
-            {isMuted ? <VolumeX className="w-4 h-4" /> : <Volume2 className="w-4 h-4" />}
+            {isMuted ? <VolumeX className="w-3.5 h-3.5 text-zinc-500" /> : <Volume2 className="w-3.5 h-3.5" />}
           </button>
 
-          <span className="text-xs font-mono text-neutral-400 ml-2">
-            <strong className="text-neutral-200">{formatTime(currentTime)}</strong> /{" "}
-            {formatTime(duration)}
-          </span>
+          {/* Fullscreen */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              if (videoRef.current?.requestFullscreen) {
+                videoRef.current.requestFullscreen();
+              }
+            }}
+            className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850 transition"
+            title="Fullscreen"
+          >
+            <Maximize2 className="w-3.5 h-3.5" />
+          </button>
         </div>
-
-        <button
-          onClick={(e) => {
-            e.stopPropagation();
-            if (videoRef.current?.requestFullscreen) {
-              videoRef.current.requestFullscreen();
-            }
-          }}
-          className="p-1.5 rounded-md hover:bg-dark-800 text-neutral-400 hover:text-neutral-200 transition"
-        >
-          <Maximize2 className="w-4 h-4" />
-        </button>
       </div>
     </div>
   );

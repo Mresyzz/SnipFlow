@@ -5,7 +5,7 @@ import { TimelineCanvas } from "./components/TimelineCanvas";
 import { Toolbar } from "./components/Toolbar";
 import { useShortcuts } from "./hooks/useShortcuts";
 import { MediaInspection, CutResult, BatchExportResult, EnvironmentStatus, AudioStreamInfo } from "./types";
-import { Film, Zap, Shield, Sparkles, AlertTriangle, FolderOpen } from "lucide-react";
+import { AlertTriangle, FolderOpen } from "lucide-react";
 
 export const App: React.FC = () => {
   const [filePath, setFilePath] = useState<string | null>(null);
@@ -34,7 +34,7 @@ export const App: React.FC = () => {
 
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [lastExportElapsedMs, setLastExportElapsedMs] = useState<number | null>(null);
-  const [statusMessage, setStatusMessage] = useState<string>("Ready");
+  const [statusMessage, setStatusMessage] = useState<string>("READY");
 
   // Check multimedia runtime environment on startup
   useEffect(() => {
@@ -45,7 +45,7 @@ export const App: React.FC = () => {
           const status = await invoke<EnvironmentStatus>("check_environment_cmd");
           setEnvStatus(status);
         } catch (e) {
-          console.error("Failed to check environment:", e);
+          console.error("Environment check error:", e);
         }
       }
     }
@@ -57,7 +57,7 @@ export const App: React.FC = () => {
     async (selectedPath: string, blobUrl?: string) => {
       setFilePath(selectedPath);
       setIsLoading(true);
-      setStatusMessage("Extracting keyframes, audio tracks & scanning dead-air...");
+      setStatusMessage("DEMUXING STREAM & SCANNING INTERVALS...");
 
       try {
         if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
@@ -94,10 +94,10 @@ export const App: React.FC = () => {
             setOutPoint(Math.min(res.duration, 10));
           }
           setStatusMessage(
-            `Loaded: ${res.keyframes.length} I-frames, ${res.peak_highlights.length} peaks, ${res.audio_tracks.length} tracks, ${res.waveform_peaks?.length || 0} waveform samples`
+            `PARSED: ${res.keyframes.length} I-FRAMES · ${res.silence_intervals.length} SILENCES · ${res.audio_tracks.length} TRACKS`
           );
         } else {
-          // Fallback for browser preview testing
+          // Fallback for browser testing
           if (blobUrl) setVideoUrl(blobUrl);
           const simulatedDuration = 120;
           setDuration(simulatedDuration);
@@ -110,7 +110,6 @@ export const App: React.FC = () => {
           ];
           setSilenceIntervals(dummySilences);
           setPeakHighlights([10.5, 33.2, 74.8, 102.1]);
-          // Simulated sinusoidal waveform
           const dummyWaves = Array.from({ length: 150 }, (_, i) =>
             Math.abs(Math.sin(i / 5) * 0.8 + Math.random() * 0.2)
           );
@@ -121,11 +120,11 @@ export const App: React.FC = () => {
           ]);
           setInPoint(18);
           setOutPoint(45);
-          setStatusMessage("Loaded in preview mode");
+          setStatusMessage("PREVIEW MODE INITIALIZED");
         }
       } catch (err) {
         console.error("Failed to inspect media:", err);
-        setStatusMessage(`Error: ${err}`);
+        setStatusMessage(`ERROR: ${err}`);
       } finally {
         setIsLoading(false);
       }
@@ -152,11 +151,11 @@ export const App: React.FC = () => {
     };
   }, [handleFileSelected]);
 
-  // Switch active audio track for silence detection
+  // Switch active audio track
   const handleSelectTrack = async (trackIdx: number) => {
     setSelectedTrackIndex(trackIdx);
     if (!filePath) return;
-    setStatusMessage(`Scanning silence on Audio Track #${trackIdx + 1}...`);
+    setStatusMessage(`SCANNING TRACK #${trackIdx + 1}...`);
 
     try {
       if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
@@ -168,7 +167,7 @@ export const App: React.FC = () => {
           trackIndex: trackIdx,
         });
         setSilenceIntervals(silences);
-        setStatusMessage(`Refreshed: ${silences.length} silences found on Track #${trackIdx + 1}`);
+        setStatusMessage(`REFRESHED: ${silences.length} SILENCES ON TRACK #${trackIdx + 1}`);
       }
     } catch (e) {
       console.error("Track rescan failed", e);
@@ -178,13 +177,13 @@ export const App: React.FC = () => {
   // Jump to next peak highlight moment
   const handleNextHighlight = useCallback(() => {
     if (peakHighlights.length === 0) {
-      setStatusMessage("No peak highlight moments detected in audio");
+      setStatusMessage("NO PEAK HIGHLIGHT DETECTED");
       return;
     }
     const nextPeak = peakHighlights.find((p) => p > currentTime + 0.5);
     const target = nextPeak !== undefined ? nextPeak : peakHighlights[0];
     setCurrentTime(target);
-    setStatusMessage(`Jumped to Peak Highlight at ${target.toFixed(2)}s`);
+    setStatusMessage(`JUMPED TO PEAK AT ${target.toFixed(2)}s`);
   }, [peakHighlights, currentTime]);
 
   // Snap In-point to closest keyframe (I-frame)
@@ -201,10 +200,10 @@ export const App: React.FC = () => {
     }
     setInPoint(closest);
     setCurrentTime(closest);
-    setStatusMessage(`Snapped In-point to Keyframe at ${closest.toFixed(3)}s`);
+    setStatusMessage(`SNAPPED IN-POINT TO I-FRAME AT ${closest.toFixed(3)}s`);
   }, [keyframes, inPoint]);
 
-  // Re-scan silence when noiseDb slider adjusts
+  // Re-scan silence on threshold slider adjustment
   const handleNoiseDbChange = async (newDb: number) => {
     setNoiseDb(newDb);
     if (!filePath) return;
@@ -225,32 +224,32 @@ export const App: React.FC = () => {
     }
   };
 
-  // Strip silence action: jump to and set In/Out across first speech segment
+  // Select first active speech segment
   const handleStripSilence = useCallback(() => {
     if (activeSegments.length > 0) {
       const [start, end] = activeSegments[0];
       setInPoint(start);
       setOutPoint(end);
       setCurrentTime(start);
-      setStatusMessage(`Selected active content segment: ${start.toFixed(2)}s -> ${end.toFixed(2)}s`);
+      setStatusMessage(`ACTIVE SEGMENT: ${start.toFixed(2)}s -> ${end.toFixed(2)}s`);
     } else {
-      setStatusMessage("No dead-air intervals detected to purge");
+      setStatusMessage("NO SILENT INTERVALS DETECTED");
     }
   }, [activeSegments]);
 
-  // Execute single lossless cut export
+  // Single lossless cut export
   const handleExport = useCallback(async () => {
     if (!filePath) return;
     const start = inPoint ?? 0;
     const end = outPoint ?? duration;
 
     if (start >= end) {
-      setStatusMessage("Error: In point must be strictly before Out point");
+      setStatusMessage("INVALID RANGE: IN-POINT MUST PRECEDE OUT-POINT");
       return;
     }
 
     setIsExporting(true);
-    setStatusMessage("Executing stream copy (-c copy)...");
+    setStatusMessage("EXECUTING STREAM COPY (-c copy)...");
 
     const defaultOutput = filePath.replace(/(\.[^.]+)$/, "_cut$1");
 
@@ -265,25 +264,25 @@ export const App: React.FC = () => {
         });
 
         setLastExportElapsedMs(res.elapsed_ms);
-        setStatusMessage(`Instant export finished in ${res.elapsed_ms.toFixed(1)}ms! Output: ${res.output_path}`);
+        setStatusMessage(`EXPORT OK: ${res.elapsed_ms.toFixed(1)}ms -> ${res.output_path}`);
       } else {
         await new Promise((r) => setTimeout(r, 90));
         setLastExportElapsedMs(88.4);
-        setStatusMessage(`Simulated lossless cut finished in 88.4ms`);
+        setStatusMessage(`EXPORT OK: 88.4ms`);
       }
     } catch (err) {
-      setStatusMessage(`Export error: ${err}`);
+      setStatusMessage(`EXPORT FAILED: ${err}`);
     } finally {
       setIsExporting(false);
     }
   }, [filePath, inPoint, outPoint, duration]);
 
-  // Execute batch multi-clip export
+  // Batch multi-clip export
   const handleBatchExport = useCallback(async () => {
     if (!filePath || activeSegments.length === 0) return;
 
     setIsExporting(true);
-    setStatusMessage(`Batch exporting ${activeSegments.length} clean clips...`);
+    setStatusMessage(`BATCH EXPORTING ${activeSegments.length} CLIPS...`);
 
     try {
       if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
@@ -296,21 +295,21 @@ export const App: React.FC = () => {
 
         setLastExportElapsedMs(res.total_elapsed_ms);
         setStatusMessage(
-          `Batch export finished! Created ${res.exported_count} clean clips in ${res.total_elapsed_ms.toFixed(1)}ms! Directory: ${res.output_dir}`
+          `BATCH OK: ${res.exported_count} CLIPS IN ${res.total_elapsed_ms.toFixed(1)}ms -> ${res.output_dir}`
         );
       } else {
         await new Promise((r) => setTimeout(r, 180));
         setLastExportElapsedMs(210.5);
-        setStatusMessage(`Simulated batch export finished! Created ${activeSegments.length} clips`);
+        setStatusMessage(`BATCH OK: ${activeSegments.length} CLIPS`);
       }
     } catch (err) {
-      setStatusMessage(`Batch export error: ${err}`);
+      setStatusMessage(`BATCH EXPORT FAILED: ${err}`);
     } finally {
       setIsExporting(false);
     }
   }, [filePath, activeSegments]);
 
-  // Bind keyboard shortcuts
+  // Keyboard shortcuts
   useShortcuts({
     togglePlay: () => setIsPlaying((prev) => !prev),
     markIn: () => setInPoint(currentTime),
@@ -321,65 +320,57 @@ export const App: React.FC = () => {
     stepFrameBackward: () => setCurrentTime((t) => Math.max(0, t - 0.04)),
   });
 
+  const fileNameOnly = filePath ? filePath.split(/[/\\]/).pop() : null;
+
   return (
-    <div className="flex flex-col h-screen w-screen bg-dark-950 text-neutral-200">
-      {/* Top Warning Banner if FFmpeg is missing */}
+    <div className="flex flex-col h-screen w-screen bg-zinc-950 text-zinc-300 select-none overflow-hidden font-sans">
+      {/* Warning Bar if FFmpeg is missing */}
       {envStatus && !envStatus.ffmpeg_available && (
-        <div className="flex items-center justify-between px-4 py-2 bg-danger-500/10 border-b border-danger-500/30 text-danger-500 text-xs">
+        <div className="flex items-center justify-between px-3 py-1 bg-red-950/40 border-b border-red-900/60 text-red-400 text-xs font-mono">
           <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 shrink-0" />
-            <span>
-              FFmpeg binaries not found. Please place <code>ffmpeg.exe</code> and <code>ffprobe.exe</code> into:{" "}
-              <strong>{envStatus.internal_bin_dir}</strong>
-            </span>
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+            <span>FFmpeg binaries not found. Expected in: <strong>{envStatus.internal_bin_dir}</strong></span>
           </div>
           <button
-            onClick={() => alert(`Please copy ffmpeg.exe & ffprobe.exe into: ${envStatus.internal_bin_dir}`)}
-            className="flex items-center gap-1 px-2.5 py-1 bg-dark-850 hover:bg-dark-800 text-neutral-200 border border-dark-750 rounded text-[11px] cursor-pointer"
+            onClick={() => alert(`Target binary directory: ${envStatus.internal_bin_dir}`)}
+            className="flex items-center gap-1 px-2 py-0.5 bg-zinc-900 border border-zinc-700 rounded text-[10px] text-zinc-300 cursor-pointer"
           >
-            <FolderOpen className="w-3.5 h-3.5" />
-            <span>Show Location</span>
+            <FolderOpen className="w-3 h-3" />
+            <span>Directory</span>
           </button>
         </div>
       )}
 
-      {/* Top Navigation Bar */}
-      <header className="flex items-center justify-between px-5 py-2.5 bg-dark-900 border-b border-dark-800">
-        <div className="flex items-center gap-2.5">
-          <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-cyan-400 to-blue-600 flex items-center justify-center shadow-md shadow-cyan-500/20">
-            <Film className="w-4 h-4 text-dark-950" />
-          </div>
-          <div>
-            <h1 className="text-sm font-bold tracking-wide text-neutral-100 flex items-center gap-1.5">
-              SnipFlow
-              <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-dark-800 text-cyan-400 border border-dark-700">
-                Lossless v0.3.0
-              </span>
-            </h1>
-          </div>
+      {/* Industrial Studio Header Bar (Compact 30px) */}
+      <header className="h-[30px] px-3 bg-zinc-900/95 border-b border-zinc-800 flex items-center justify-between font-mono text-xs shrink-0">
+        <div className="flex items-center gap-2">
+          <span className="font-bold tracking-widest text-zinc-100 text-[11px]">SNIPFLOW</span>
+          <span className="text-zinc-600">/</span>
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">v0.3.0</span>
+          {fileNameOnly && (
+            <>
+              <span className="text-zinc-700">|</span>
+              <span className="text-zinc-300 text-[11px] truncate max-w-md">{fileNameOnly}</span>
+            </>
+          )}
         </div>
 
-        <div className="flex items-center gap-4 text-xs text-neutral-400 font-mono">
-          <div className="flex items-center gap-1.5">
-            <Zap className="w-3.5 h-3.5 text-cyan-400" />
-            <span>0.1s Stream Copy</span>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <Shield className="w-3.5 h-3.5 text-green-400" />
-            <span>100% Local-First</span>
-          </div>
+        <div className="flex items-center gap-3 text-[10px] text-zinc-500 font-mono">
+          <span>ENGINE: RUST/FFMPEG</span>
+          <span>·</span>
+          <span>PASSTHROUGH: COPY</span>
         </div>
       </header>
 
       {/* Main Workspace Body */}
-      <main className="flex-1 flex flex-col p-4 gap-3 overflow-hidden">
+      <main className="flex-1 flex flex-col p-2 gap-2 overflow-hidden min-h-0">
         {!filePath ? (
-          <div className="flex-1 flex items-center justify-center p-8">
+          <div className="flex-1 flex items-center justify-center p-4">
             <DropZone onFileSelected={handleFileSelected} isLoading={isLoading} />
           </div>
         ) : (
           <>
-            {/* Video Viewport Area */}
+            {/* Monitor Viewport */}
             <div className="flex-1 min-h-0 w-full flex items-center justify-center">
               {videoUrl ? (
                 <VideoPlayer
@@ -391,14 +382,14 @@ export const App: React.FC = () => {
                   onTogglePlay={() => setIsPlaying(!isPlaying)}
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center bg-dark-900/50 rounded-xl border border-dark-800">
-                  <Film className="w-12 h-12 text-neutral-600 animate-pulse" />
+                <div className="w-full h-full flex items-center justify-center bg-black rounded border border-zinc-850 font-mono text-xs text-zinc-600">
+                  NO VIDEO SIGNAL
                 </div>
               )}
             </div>
 
-            {/* Timeline Canvas Container */}
-            <div className="w-full bg-dark-900 p-2.5 rounded-xl border border-dark-800 flex flex-col gap-2">
+            {/* Timeline Canvas Section */}
+            <div className="w-full shrink-0">
               <TimelineCanvas
                 duration={duration}
                 currentTime={currentTime}
@@ -414,65 +405,53 @@ export const App: React.FC = () => {
               />
             </div>
 
-            {/* Action Toolbar */}
-            <Toolbar
-              inPoint={inPoint}
-              outPoint={outPoint}
-              currentTime={currentTime}
-              keyframes={keyframes}
-              isMagneticSnapEnabled={isMagneticSnapEnabled}
-              noiseDb={noiseDb}
-              zoomLevel={zoomLevel}
-              isExporting={isExporting}
-              lastExportElapsedMs={lastExportElapsedMs}
-              silenceCount={silenceIntervals.length}
-              audioTracks={audioTracks}
-              selectedTrackIndex={selectedTrackIndex}
-              highlightCount={peakHighlights.length}
-              activeSegmentCount={activeSegments.length}
-              onSelectTrack={handleSelectTrack}
-              onToggleMagneticSnap={() => setIsMagneticSnapEnabled(!isMagneticSnapEnabled)}
-              onNoiseDbChange={handleNoiseDbChange}
-              onZoomIn={() => setZoomLevel((z) => Math.min(8, z * 2))}
-              onZoomOut={() => setZoomLevel((z) => Math.max(1, z / 2))}
-              onMarkIn={() => setInPoint(currentTime)}
-              onMarkOut={() => setOutPoint(currentTime)}
-              onSnapInToKeyframe={handleSnapInToKeyframe}
-              onStripSilence={handleStripSilence}
-              onNextHighlight={handleNextHighlight}
-              onExport={handleExport}
-              onBatchExport={handleBatchExport}
-            />
+            {/* Compact Transport Toolbar */}
+            <div className="w-full shrink-0">
+              <Toolbar
+                inPoint={inPoint}
+                outPoint={outPoint}
+                currentTime={currentTime}
+                keyframes={keyframes}
+                isMagneticSnapEnabled={isMagneticSnapEnabled}
+                noiseDb={noiseDb}
+                zoomLevel={zoomLevel}
+                isExporting={isExporting}
+                lastExportElapsedMs={lastExportElapsedMs}
+                silenceCount={silenceIntervals.length}
+                audioTracks={audioTracks}
+                selectedTrackIndex={selectedTrackIndex}
+                highlightCount={peakHighlights.length}
+                activeSegmentCount={activeSegments.length}
+                onSelectTrack={handleSelectTrack}
+                onToggleMagneticSnap={() => setIsMagneticSnapEnabled(!isMagneticSnapEnabled)}
+                onNoiseDbChange={handleNoiseDbChange}
+                onZoomIn={() => setZoomLevel((z) => Math.min(8, z * 2))}
+                onZoomOut={() => setZoomLevel((z) => Math.max(1, z / 2))}
+                onMarkIn={() => setInPoint(currentTime)}
+                onMarkOut={() => setOutPoint(currentTime)}
+                onSnapInToKeyframe={handleSnapInToKeyframe}
+                onStripSilence={handleStripSilence}
+                onNextHighlight={handleNextHighlight}
+                onExport={handleExport}
+                onBatchExport={handleBatchExport}
+              />
+            </div>
           </>
         )}
       </main>
 
-      {/* Bottom Status / Keyboard Hint Bar */}
-      <footer className="flex items-center justify-between px-4 py-1.5 bg-dark-900 border-t border-dark-800 text-[11px] text-neutral-500 font-mono">
-        <div className="flex items-center gap-2 truncate">
-          <Sparkles className="w-3 h-3 text-cyan-400 shrink-0" />
-          <span className="truncate text-neutral-400">{statusMessage}</span>
+      {/* Industrial Status Footer (Compact 22px) */}
+      <footer className="h-[22px] px-3 bg-zinc-950 border-t border-zinc-850 flex items-center justify-between font-mono text-[10px] text-zinc-500 shrink-0">
+        <div className="truncate text-zinc-400">
+          <span>&gt; {statusMessage}</span>
         </div>
 
-        <div className="flex items-center gap-3 shrink-0">
-          <span>
-            <kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">Space</kbd> Play
-          </span>
-          <span>
-            <kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">←/→</kbd> Step
-          </span>
-          <span>
-            <kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">I</kbd> In
-          </span>
-          <span>
-            <kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">O</kbd> Out
-          </span>
-          <span>
-            <kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">H</kbd> Next Peak
-          </span>
-          <span>
-            <kbd className="px-1 py-0.5 rounded bg-dark-800 text-neutral-300">Enter</kbd> Export
-          </span>
+        <div className="flex items-center gap-2.5 text-zinc-500 shrink-0">
+          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">SPACE</kbd> PLAY</span>
+          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">←/→</kbd> STEP</span>
+          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">I</kbd> IN</span>
+          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">O</kbd> OUT</span>
+          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">ENTER</kbd> EXPORT</span>
         </div>
       </footer>
     </div>

@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { UploadCloud, Film, Loader2 } from "lucide-react";
+import { Loader2, Crosshair, FolderOpen } from "lucide-react";
 
 interface DropZoneProps {
   onFileSelected: (filePath: string, fileBlobUrl?: string) => void;
@@ -10,7 +10,6 @@ export const DropZone: React.FC<DropZoneProps> = ({ onFileSelected, isLoading })
   const [isDragOver, setIsDragOver] = useState(false);
 
   const handleClickZone = async (e: React.MouseEvent) => {
-    // If running in Tauri desktop environment, call native system file picker
     if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
       e.preventDefault();
       try {
@@ -61,10 +60,10 @@ export const DropZone: React.FC<DropZoneProps> = ({ onFileSelected, isLoading })
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`relative w-full h-full flex flex-col items-center justify-center border-2 border-dashed rounded-xl transition-all duration-200 cursor-pointer ${
+      className={`relative w-full h-full flex flex-col items-center justify-center rounded bg-zinc-950 border transition-all cursor-pointer select-none ${
         isDragOver
-          ? "border-cyan-400 bg-cyan-400/5"
-          : "border-dark-700 hover:border-cyan-500/50 bg-dark-900/60"
+          ? "border-cyan-500 bg-cyan-950/10"
+          : "border-zinc-800/80 hover:border-zinc-700 bg-zinc-950/80"
       }`}
     >
       <input
@@ -76,33 +75,43 @@ export const DropZone: React.FC<DropZoneProps> = ({ onFileSelected, isLoading })
       />
 
       {isLoading ? (
-        <div className="flex flex-col items-center gap-4 text-neutral-300 pointer-events-none">
-          <Loader2 className="w-12 h-12 text-cyan-400 animate-spin" />
-          <div className="text-center">
-            <p className="text-base font-medium">Extracting Keyframes & Analyzing Silence...</p>
-            <p className="text-xs text-neutral-500 mt-1">Zero-decode stream scanning in background</p>
+        <div className="flex flex-col items-center gap-3 text-zinc-300 pointer-events-none">
+          <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
+          <div className="text-center font-mono">
+            <p className="text-xs uppercase tracking-wider text-zinc-200">Demuxing Stream Metadata...</p>
+            <p className="text-[11px] text-zinc-500 mt-1">Indexing I-frames & scanning silence intervals</p>
           </div>
         </div>
       ) : (
         <div className="flex flex-col items-center gap-4 text-center px-6 pointer-events-none">
-          <div className="w-16 h-16 rounded-2xl bg-dark-850 flex items-center justify-center border border-dark-800 shadow-lg">
-            {isDragOver ? (
-              <Film className="w-8 h-8 text-cyan-400 animate-pulse" />
-            ) : (
-              <UploadCloud className="w-8 h-8 text-neutral-400" />
-            )}
+          {/* Studio Monitor Standby Reticle */}
+          <div className="relative w-20 h-20 rounded border border-zinc-800 bg-zinc-900/60 flex items-center justify-center">
+            <Crosshair className={`w-8 h-8 ${isDragOver ? "text-cyan-400 animate-pulse" : "text-zinc-600"}`} />
+            <div className="absolute top-1 left-1.5 text-[9px] font-mono text-zinc-600">SRC</div>
+            <div className="absolute bottom-1 right-1.5 text-[9px] font-mono text-zinc-600">RAW</div>
           </div>
+
           <div>
-            <h3 className="text-lg font-semibold text-neutral-200">
-              Drop Raw Video Here
+            <h3 className="text-sm font-semibold tracking-wide uppercase font-mono text-zinc-200">
+              No Media Loaded
             </h3>
-            <p className="text-sm text-neutral-400 mt-1">
-              Supports MP4, MKV, MOV, WebM (4K UHD 60fps & HDR)
+            <p className="text-xs font-mono text-zinc-500 mt-1">
+              Drop video asset or browse local filesystem
             </p>
           </div>
-          <span className="inline-block text-xs uppercase tracking-wider px-3 py-1 bg-dark-800 text-cyan-400 rounded-md border border-dark-700 font-mono shadow-sm">
-            Or Click to Choose File (Native Dialog)
-          </span>
+
+          <div className="flex items-center gap-2 mt-2">
+            <span className="flex items-center gap-1.5 px-3 py-1 bg-zinc-900 hover:bg-zinc-850 text-zinc-300 text-xs font-mono rounded border border-zinc-750 transition shadow-sm">
+              <FolderOpen className="w-3.5 h-3.5 text-zinc-400" />
+              <span>Select File</span>
+            </span>
+          </div>
+
+          <div className="flex items-center gap-2 mt-4 text-[10px] font-mono text-zinc-600">
+            <span>MP4 / MKV / MOV / WEBM</span>
+            <span>·</span>
+            <span>H.264 / HEVC / AV1 / PRORES</span>
+          </div>
         </div>
       )}
     </div>
