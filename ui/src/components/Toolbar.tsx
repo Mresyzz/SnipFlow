@@ -9,6 +9,8 @@ import {
   Disc,
   Layers,
   Sparkles,
+  Zap,
+  FolderOpen,
 } from "lucide-react";
 import { AudioStreamInfo } from "../types";
 
@@ -27,6 +29,7 @@ interface ToolbarProps {
   selectedTrackIndex: number;
   highlightCount: number;
   activeSegmentCount: number;
+  customOutputDir: string | null;
   onSelectTrack: (trackIndex: number) => void;
   onToggleMagneticSnap: () => void;
   onNoiseDbChange: (db: number) => void;
@@ -37,8 +40,10 @@ interface ToolbarProps {
   onSnapInToKeyframe: () => void;
   onStripSilence: () => void;
   onNextHighlight: () => void;
+  onSelectOutputDir: () => void;
   onExport: () => void;
   onBatchExport: () => void;
+  onSeamlessMerge: () => void;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
@@ -56,6 +61,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   selectedTrackIndex,
   highlightCount,
   activeSegmentCount,
+  customOutputDir,
   onSelectTrack,
   onToggleMagneticSnap,
   onNoiseDbChange,
@@ -66,8 +72,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onSnapInToKeyframe,
   onStripSilence,
   onNextHighlight,
+  onSelectOutputDir,
   onExport,
   onBatchExport,
+  onSeamlessMerge,
 }) => {
   const selectionDuration =
     inPoint !== null && outPoint !== null ? Math.max(0, outPoint - inPoint) : null;
@@ -123,7 +131,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           </span>
         )}
 
-        {/* I-Frame Alignment Status LED */}
+        {/* I-Frame Alignment Status LED (Native SVG Indicator) */}
         {inPoint !== null && keyframes.length > 0 && (
           <button
             onClick={onSnapInToKeyframe}
@@ -138,7 +146,9 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 : "Unaligned boundary. Click to snap to nearest I-frame"
             }
           >
-            <span className={`w-1.5 h-1.5 rounded-full ${isKeyframeAligned ? "bg-emerald-400" : "bg-amber-400 animate-pulse"}`} />
+            <svg className="w-1.5 h-1.5 fill-current" viewBox="0 0 6 6">
+              <circle cx="3" cy="3" r="3" />
+            </svg>
             <span>{isKeyframeAligned ? "I-FRAME" : "SNAP I-FRAME"}</span>
           </button>
         )}
@@ -221,29 +231,57 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
       {/* Right: Export Actions */}
       <div className="flex items-center gap-1.5">
+        {/* Destination folder picker */}
+        <button
+          onClick={onSelectOutputDir}
+          className={`p-1 rounded border transition cursor-pointer ${
+            customOutputDir
+              ? "bg-zinc-800 border-cyan-700 text-cyan-400"
+              : "bg-zinc-850 hover:bg-zinc-800 border-zinc-750 text-zinc-400 hover:text-zinc-200"
+          }`}
+          title={customOutputDir ? `Output: ${customOutputDir}` : "Set Custom Export Directory"}
+        >
+          <FolderOpen className="w-3.5 h-3.5" />
+        </button>
+
         {lastExportElapsedMs !== null && (
-          <span className="text-[10px] text-emerald-400 mr-1">
+          <span className="text-[10px] text-emerald-400 mr-1 font-mono">
             {lastExportElapsedMs.toFixed(1)}ms
           </span>
         )}
 
+        {/* Seamless Merge Button (Zero-reencode single continuous file) */}
+        {activeSegmentCount > 1 && (
+          <button
+            onClick={onSeamlessMerge}
+            disabled={isExporting}
+            className="flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-950/30 hover:bg-emerald-900/40 text-emerald-400 border border-emerald-800 text-[11px] font-bold cursor-pointer disabled:opacity-40 transition"
+            title="Remove all silent pauses and merge into a single seamless continuous video"
+          >
+            <Zap className="w-3 h-3" />
+            <span>SEAMLESS MERGE ({activeSegmentCount})</span>
+          </button>
+        )}
+
+        {/* Batch clips export */}
         {activeSegmentCount > 1 && (
           <button
             onClick={onBatchExport}
             disabled={isExporting}
-            className="flex items-center gap-1 px-2.5 py-1 rounded bg-zinc-850 hover:bg-zinc-800 text-zinc-300 border border-zinc-750 text-[11px] cursor-pointer disabled:opacity-40"
+            className="flex items-center gap-1 px-2 py-1 rounded bg-zinc-850 hover:bg-zinc-800 text-zinc-300 border border-zinc-750 text-[11px] cursor-pointer disabled:opacity-40"
             title="Batch Export All Clean Clips"
           >
             <Layers className="w-3 h-3" />
-            <span>BATCH ({activeSegmentCount})</span>
+            <span>BATCH</span>
           </button>
         )}
 
+        {/* Single cut export */}
         <button
           onClick={onExport}
           disabled={isExporting}
           className="flex items-center gap-1.5 px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-zinc-950 font-bold text-[11px] transition cursor-pointer disabled:opacity-40"
-          title="Lossless Export (Enter)"
+          title="Lossless Export Active In/Out Range (Enter)"
         >
           {isExporting ? (
             <>

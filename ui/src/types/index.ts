@@ -39,3 +39,9 @@ export interface BatchExportResult {
   output_dir: string;
   clips: string[];
 }
+
+export interface SeamlessMergeResult {
+  output_path: string;
+  total_elapsed_ms: number;
+  merged_segments_count: number;
+}

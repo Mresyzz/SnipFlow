@@ -16,12 +16,12 @@ fn run_cli_mode(video_path: PathBuf, output_path: PathBuf) -> Result<(), Box<dyn
     println!("[*] Source Asset: {}", video_path.display());
 
     let duration = get_duration(&video_path)?;
-    println!("[✓] Stream Duration: {:.3}s ({:.2} min)", duration, duration / 60.0);
+    println!("[OK] Stream Duration: {:.3}s ({:.2} min)", duration, duration / 60.0);
 
     let t0 = Instant::now();
     let keyframes = get_keyframes(&video_path)?;
     println!(
-        "[✓] Extracted {} keyframes in {:.2}ms",
+        "[OK] Extracted {} keyframes in {:.2}ms",
         keyframes.len(),
         t0.elapsed().as_secs_f64() * 1000.0
     );
@@ -29,7 +29,7 @@ fn run_cli_mode(video_path: PathBuf, output_path: PathBuf) -> Result<(), Box<dyn
     let t1 = Instant::now();
     let silence_intervals = detect_silence(&video_path, -30.0, 0.5)?;
     println!(
-        "[✓] Found {} silent regions in {:.2}ms",
+        "[OK] Found {} silent regions in {:.2}ms",
         silence_intervals.len(),
         t1.elapsed().as_secs_f64() * 1000.0
     );
@@ -44,7 +44,7 @@ fn run_cli_mode(video_path: PathBuf, output_path: PathBuf) -> Result<(), Box<dyn
     println!("[*] Exporting: [{:.3}s -> {:.3}s] -> {}", cut_start, cut_end, output_path.display());
     let t2 = Instant::now();
     lossless_cut(&video_path, cut_start, cut_end, &output_path)?;
-    println!("[✓] Export completed in {:.2}ms (Zero Re-encoding)", t2.elapsed().as_secs_f64() * 1000.0);
+    println!("[OK] Export completed in {:.2}ms (Zero Re-encoding)", t2.elapsed().as_secs_f64() * 1000.0);
     println!("--------------------------------------------------");
 
     Ok(())
@@ -82,6 +82,7 @@ fn main() {
             commands::media::scan_peak_highlights_cmd,
             commands::cut::lossless_cut_cmd,
             commands::cut::batch_export_segments_cmd,
+            commands::cut::export_seamless_merge_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running SnipFlow desktop application");

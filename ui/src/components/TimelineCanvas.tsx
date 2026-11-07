@@ -13,6 +13,8 @@ interface TimelineCanvasProps {
   isMagneticSnapEnabled: boolean;
   zoomLevel: number;
   onSeek: (time: number) => void;
+  onDragStart?: () => void;
+  onDragEnd?: () => void;
 }
 
 export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
@@ -27,6 +29,8 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   isMagneticSnapEnabled,
   zoomLevel,
   onSeek,
+  onDragStart,
+  onDragEnd,
 }) => {
   const scrollContainerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -114,7 +118,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       const centerY = 58;
       const maxAmp = 24;
 
-      ctx.fillStyle = "#334155"; // Neutral slate audio wave
+      ctx.fillStyle = "#334155";
       for (let i = 0; i < barCount; i++) {
         const peak = waveformPeaks[i];
         const bx = (i / barCount) * width;
@@ -131,7 +135,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       ctx.fillRect(x0, 28, Math.max(2, x1 - x0), height - 28);
     }
 
-    // 4. Peak Highlight Markers (Solid subtle gold ticks)
+    // 4. Peak Highlight Markers (Solid subtle amber ticks)
     ctx.fillStyle = "#d97706";
     for (const peak of peakHighlights) {
       const x = timeToX(peak);
@@ -166,9 +170,9 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       // Selected region active border
       ctx.strokeStyle = "rgba(14, 165, 233, 0.8)";
       ctx.lineWidth = 1;
-      ctx.strokeRect(xIn, 20, xOut - xIn, height - 20);
+      ctx.strokeRect(xIn, 20, Math.max(1, xOut - xIn), height - 20);
 
-      // Boundary brackets [ and ]
+      // Boundary brackets
       ctx.fillStyle = "#0ea5e9";
       ctx.fillRect(xIn - 1, 0, 2, height);
       ctx.fillRect(xOut - 1, 0, 2, height);
@@ -193,7 +197,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
 
       if (x - lastLabelX > 60) {
         ctx.fillStyle = "#71717a";
-        ctx.font = "9px monospace";
+        ctx.font = "9px 'JetBrains Mono', monospace";
         const m = Math.floor(t / 60);
         const s = Math.floor(t % 60);
         const label = `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
@@ -213,9 +217,9 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
       ctx.stroke();
     }
 
-    // 9. Standard NLE Playhead (Orange/Red fine needle with top triangle)
+    // 9. Standard NLE Playhead (Ruby red fine needle with top triangle)
     const px = timeToX(currentTime);
-    ctx.strokeStyle = "#f43f5e"; // Professional ruby red playhead
+    ctx.strokeStyle = "#f43f5e";
     ctx.lineWidth = 1.5;
     ctx.beginPath();
     ctx.moveTo(px, 0);
@@ -245,6 +249,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
 
   const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     setIsDragging(true);
+    if (onDragStart) onDragStart();
     e.currentTarget.setPointerCapture(e.pointerId);
     const rect = e.currentTarget.getBoundingClientRect();
     onSeek(calculateTargetTime(e.clientX, rect));
@@ -263,6 +268,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     if (isDragging) {
       setIsDragging(false);
       e.currentTarget.releasePointerCapture(e.pointerId);
+      if (onDragEnd) onDragEnd();
     }
   };
 

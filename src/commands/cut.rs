@@ -98,3 +98,48 @@ pub async fn batch_export_segments_cmd(
     .await
     .map_err(|e| format!("Batch cut failed: {e}"))?
 }
+
+#[derive(Serialize, Clone, Debug)]
+pub struct SeamlessMergeResult {
+    pub output_path: String,
+    pub total_elapsed_ms: f64,
+    pub merged_segments_count: usize,
+}
+
+#[command]
+pub async fn export_seamless_merge_cmd(
+    source_path: String,
+    segments: Vec<(f64, f64)>,
+    output_path_override: Option<String>,
+) -> Result<SeamlessMergeResult, String> {
+    tokio::task::spawn_blocking(move || {
+        let src = PathBuf::from(&source_path);
+        if !src.exists() {
+            return Err(format!("Source media not found: {source_path}"));
+        }
+
+        let dst = match output_path_override {
+            Some(p) => PathBuf::from(p),
+            None => {
+                let stem = src.file_stem().unwrap_or_default().to_string_lossy();
+                let ext = src.extension().unwrap_or_default().to_string_lossy();
+                let ext_str = if ext.is_empty() { "mp4" } else { &ext };
+                src.parent()
+                    .unwrap_or(PathBuf::from(".").as_path())
+                    .join(format!("{stem}_seamless_cut.{ext_str}"))
+            }
+        };
+
+        let t0 = std::time::Instant::now();
+        crate::seamless_merge(&src, &segments, &dst).map_err(|e| e.to_string())?;
+        let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+        Ok(SeamlessMergeResult {
+            output_path: dst.to_string_lossy().to_string(),
+            total_elapsed_ms: elapsed_ms,
+            merged_segments_count: segments.len(),
+        })
+    })
+    .await
+    .map_err(|e| format!("Seamless merge failed: {e}"))?
+}
