@@ -442,3 +442,49 @@ pub fn seamless_merge(
 ) -> Result<()> {
     seamless_merge_with_mode(video_path, segments, output_path, CutMode::StreamCopy)
 }
+
+/// Extracts a single full-resolution video frame at `timestamp_sec` to an image file (PNG or JPEG).
+pub fn extract_frame_snapshot(
+    video_path: &Path,
+    timestamp_sec: f64,
+    output_path: &Path,
+) -> Result<()> {
+    if !video_path.exists() {
+        return Err(SnipFlowError::FileNotFound(video_path.to_path_buf()));
+    }
+    ensure_distinct_paths(video_path, output_path)?;
+
+    let ffmpeg = find_binary("ffmpeg")?;
+    let abs_source = resolve_abs_path(video_path);
+    let abs_output = resolve_abs_path(output_path);
+
+    if let Some(parent) = abs_output.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+
+    let mut cmd = Command::new(ffmpeg);
+    cmd.args([
+        "-ss",
+        &format!("{:.4}", timestamp_sec.max(0.0)),
+        "-i",
+    ]);
+    cmd.arg(&abs_source);
+    cmd.args([
+        "-frames:v",
+        "1",
+        "-q:v",
+        "2",
+        "-y",
+    ]);
+    cmd.arg(&abs_output);
+
+    run_command(&mut cmd, "ffmpeg frame snapshot")?;
+
+    if !abs_output.is_file() {
+        return Err(SnipFlowError::ProcessFailed(
+            "Snapshot image file was not created by FFmpeg".to_string(),
+        ));
+    }
+
+    Ok(())
+}

@@ -1,9 +1,17 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::command;
 use snipflow::{
-    export_cmx3600_edl, export_fcpxml, lossless_cut_with_mode, seamless_merge_with_mode, CutMode,
+    export_cmx3600_edl, export_fcpxml, extract_frame_snapshot, lossless_cut_with_mode,
+    seamless_merge_with_mode, CutMode,
 };
+
+#[derive(Serialize, Clone, Debug)]
+pub struct SnapshotResult {
+    pub output_path: String,
+    pub timestamp_sec: f64,
+    pub elapsed_ms: f64,
+}
 
 #[derive(Serialize, Clone, Debug)]
 pub struct CutResult {
@@ -201,4 +209,35 @@ pub async fn export_nle_timeline_cmd(
     })
     .await
     .map_err(|e| format!("NLE timeline export failed: {e}"))?
+}
+
+#[command]
+pub async fn export_frame_snapshot_cmd(
+    source_path: String,
+    timestamp_sec: f64,
+    output_path_override: Option<String>,
+) -> Result<SnapshotResult, String> {
+    tokio::task::spawn_blocking(move || {
+        let src = PathBuf::from(&source_path);
+        let dst = if let Some(out) = output_path_override {
+            PathBuf::from(out)
+        } else {
+            let parent = src.parent().unwrap_or_else(|| Path::new("."));
+            let stem = src.file_stem().and_then(|s| s.to_str()).unwrap_or("video");
+            let sec_str = format!("{:.2}", timestamp_sec).replace('.', "_");
+            parent.join(format!("{}_snapshot_{}s.jpg", stem, sec_str))
+        };
+
+        let t0 = std::time::Instant::now();
+        extract_frame_snapshot(&src, timestamp_sec, &dst).map_err(|e| e.to_string())?;
+        let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+        Ok(SnapshotResult {
+            output_path: dst.to_string_lossy().to_string(),
+            timestamp_sec,
+            elapsed_ms,
+        })
+    })
+    .await
+    .map_err(|e| format!("Snapshot export failed: {e}"))?
 }

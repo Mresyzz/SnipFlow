@@ -56,6 +56,12 @@ export interface MediaInspection {
   validation?: MediaContainerValidation;
 }
 
+export interface SnapshotResult {
+  output_path: string;
+  timestamp_sec: number;
+  elapsed_ms: number;
+}
+
 export interface CutResult {
   output_path: string;
   elapsed_ms: number;

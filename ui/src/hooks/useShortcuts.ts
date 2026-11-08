@@ -19,6 +19,7 @@ interface ShortcutActions {
   undo?: () => void;
   redo?: () => void;
   openFile?: () => void;
+  exportSnapshot?: () => void;
 }
 
 export function useShortcuts({
@@ -40,6 +41,7 @@ export function useShortcuts({
   undo,
   redo,
   openFile,
+  exportSnapshot,
 }: ShortcutActions) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -122,6 +124,12 @@ export function useShortcuts({
             onNextHighlight();
           }
           break;
+        case "KeyP":
+          if (exportSnapshot) {
+            e.preventDefault();
+            exportSnapshot();
+          }
+          break;
         case "Enter":
           e.preventDefault();
           triggerExport();
@@ -178,5 +186,6 @@ export function useShortcuts({
     undo,
     redo,
     openFile,
+    exportSnapshot,
   ]);
 }

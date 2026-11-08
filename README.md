@@ -137,6 +137,7 @@ snipflow --batch ./raw_recordings --out-dir ./cleaned_vods --min-silence 0.5 --m
 | `J` / `K` / `L` | **Shuttle Control** | Rewind 2s / Pause / Cycle playback speed (`1x` -> `1.5x` -> `2x` -> `4x`) |
 | `S` | **Live Skip-Silence** | Real-time audition mode that jumps over silent intervals during playback |
 | `X` | **Blade Slice** | Split active clip at playhead position |
+| `P` | **Snapshot Frame** | Capture and export full-resolution poster frame at playhead (`.jpg`) |
 | `←` / `→` | **Step Frame** | Move playhead backward / forward by 1 frame |
 | `Shift + ←` / `→` | **Seek I-Frame** | Jump directly to previous / next physical GOP keyframe |
 | `I` / `O` | **Mark In / Out** | Set start and end boundaries (or drag `[` and `]` handles directly on timeline) |

@@ -1,5 +1,5 @@
 import React, { useRef, useEffect, useState } from "react";
-import { Play, Pause, Volume2, VolumeX, Maximize2, SkipBack, SkipForward, FastForward } from "lucide-react";
+import { Play, Pause, Volume2, VolumeX, Maximize2, SkipBack, SkipForward, FastForward, Camera } from "lucide-react";
 
 interface VideoPlayerProps {
   src: string;
@@ -14,6 +14,7 @@ interface VideoPlayerProps {
   onEnded: () => void;
   onCyclePlaybackRate: () => void;
   onToggleSkipSilencePreview: () => void;
+  onSnapshot?: () => void;
 }
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
@@ -29,6 +30,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   onEnded,
   onCyclePlaybackRate,
   onToggleSkipSilencePreview,
+  onSnapshot,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [isMuted, setIsMuted] = useState(false);
@@ -216,6 +218,20 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               <Volume2 className="w-4 h-4" />
             )}
           </button>
+
+          {onSnapshot && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                onSnapshot();
+              }}
+              aria-label="Capture full-resolution frame snapshot (P)"
+              title="Capture full-resolution frame snapshot (P)"
+              className="p-1.5 rounded-md text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition cursor-pointer"
+            >
+              <Camera className="w-3.5 h-3.5" />
+            </button>
+          )}
 
           <button
             onClick={(e) => {

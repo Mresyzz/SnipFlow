@@ -190,3 +190,18 @@ fn test_build_highlight_segments() {
     let segments = build_highlight_segments(&peaks, 40.0, 2.5, 4.5);
     assert_eq!(segments, vec![(7.5, 18.5), (27.5, 34.5)]);
 }
+
+#[test]
+fn test_snapshot_same_path_protection() {
+    let existing = Path::new("Cargo.toml");
+    let res = snipflow::extract_frame_snapshot(existing, 1.0, existing);
+    assert!(res.is_err(), "Snapshot export to the exact same file path as source must be rejected");
+}
+
+#[test]
+fn test_snapshot_nonexistent_file() {
+    let non_existent = Path::new("non_existent_video_path.mp4");
+    let out = Path::new("snapshot.jpg");
+    let res = snipflow::extract_frame_snapshot(non_existent, 1.0, out);
+    assert!(res.is_err(), "Snapshot of nonexistent media should fail with FileNotFound error");
+}

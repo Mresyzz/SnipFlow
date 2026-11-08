@@ -24,12 +24,13 @@ fn is_supported_video_file(path: &Path) -> bool {
 }
 
 fn print_cli_help() {
-    println!("SnipFlow v0.7.0 - Zero-Reencode Video Clipper & Silence Stripper");
+    println!("SnipFlow v0.7.1 - Zero-Reencode Video Clipper & Silence Stripper");
     println!();
     println!("USAGE:");
     println!("  snipflow                                      Launch desktop studio GUI");
     println!("  snipflow --cli <input> [output]               Single-file silence strip & cut");
     println!("  snipflow --batch <dir_or_files...> [options]  Headless batch silence stripping");
+    println!("  snipflow --snapshot <input> <sec> [output]    Extract high-fidelity frame snapshot");
     println!();
     println!("BATCH OPTIONS:");
     println!("  --out-dir <dir>       Output directory for cleaned videos");
@@ -268,6 +269,34 @@ fn main() {
                 print_cli_help();
                 return;
             }
+            "--snapshot" => {
+                if args.len() < 4 {
+                    eprintln!("[!] Missing arguments for --snapshot: snipflow --snapshot <input> <sec> [output]");
+                    std::process::exit(1);
+                }
+                let input_path = PathBuf::from(&args[2]);
+                let sec = match args[3].parse::<f64>() {
+                    Ok(s) => s,
+                    Err(e) => {
+                        eprintln!("[!] Invalid timestamp seconds: {e}");
+                        std::process::exit(1);
+                    }
+                };
+                let output_path = if args.len() > 4 {
+                    PathBuf::from(&args[4])
+                } else {
+                    let parent = input_path.parent().unwrap_or_else(|| Path::new("."));
+                    let stem = input_path.file_stem().and_then(|s| s.to_str()).unwrap_or("video");
+                    let sec_str = format!("{:.2}", sec).replace('.', "_");
+                    parent.join(format!("{}_snapshot_{}s.jpg", stem, sec_str))
+                };
+                if let Err(e) = snipflow::extract_frame_snapshot(&input_path, sec, &output_path) {
+                    eprintln!("[!] Snapshot extraction failed: {e}");
+                    std::process::exit(1);
+                }
+                println!("[OK] Extracted snapshot at {:.2}s -> {}", sec, output_path.display());
+                return;
+            }
             "--batch" => {
                 if let Err(e) = run_batch_mode(&args[2..]) {
                     eprintln!("[!] Batch execution failed: {e}");
@@ -327,6 +356,7 @@ fn main() {
             commands::cut::batch_export_segments_cmd,
             commands::cut::export_seamless_merge_cmd,
             commands::cut::export_nle_timeline_cmd,
+            commands::cut::export_frame_snapshot_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running SnipFlow desktop application");

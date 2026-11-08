@@ -5,7 +5,7 @@ set -eu
 
 REPO="Mresyzz/SnipFlow"
 BINARY_NAME="snipflow"
-FALLBACK_VERSION="v0.7.0"
+FALLBACK_VERSION="v0.7.1"
 
 # 1. Determine installation directory
 INSTALL_DIR="${SNIPFLOW_INSTALL_DIR:-"$HOME/.local/bin"}"
@@ -119,7 +119,12 @@ else
   fi
 fi
 
-tar -xzf "$TMP_DIR/archive.tar.gz" -C "$TMP_DIR"
+# Extract archive safely (--no-same-owner prevents chown EPERM inside unprivileged/rootless containers)
+if tar --help 2>&1 | grep -q -- '--no-same-owner'; then
+  tar -xzf "$TMP_DIR/archive.tar.gz" --no-same-owner -C "$TMP_DIR"
+else
+  tar -xzf "$TMP_DIR/archive.tar.gz" -C "$TMP_DIR" 2>/dev/null || tar -xzf "$TMP_DIR/archive.tar.gz" --no-same-owner -C "$TMP_DIR"
+fi
 
 if [ ! -f "$TMP_DIR/$BINARY_NAME" ]; then
   # Check if unpacked into subfolder

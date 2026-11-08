@@ -10,6 +10,7 @@ import {
   BatchExportResult,
   SeamlessMergeResult,
   NleExportResult,
+  SnapshotResult,
   EnvironmentStatus,
   AudioStreamInfo,
   AudioVolumeProfile,
@@ -37,7 +38,8 @@ import {
 function computeActiveSegmentsWithPadding(
   silenceIntervals: [number, number][],
   totalDuration: number,
-  paddingSec: number = 0.06
+  paddingSec: number = 0.06,
+  minClipDurationSec: number = 0.2
 ): [number, number][] {
   if (totalDuration <= 0) return [];
   if (silenceIntervals.length === 0) return [[0, totalDuration]];
@@ -65,7 +67,9 @@ function computeActiveSegmentsWithPadding(
     active.push([currentPos, totalDuration]);
   }
 
-  return active;
+  return minClipDurationSec > 0
+    ? active.filter(([s, e]) => e - s >= minClipDurationSec)
+    : active;
 }
 
 /**
@@ -869,6 +873,27 @@ export const App: React.FC = () => {
     }
   }, [filePath, activeSegments, inPoint, outPoint, duration, customOutputDir]);
 
+  // Capture full-resolution video frame snapshot at playhead
+  const handleExportFrameSnapshot = useCallback(async () => {
+    if (!filePath) return;
+    setStatusMessage(`CAPTURING HIGH-FIDELITY FRAME SNAPSHOT AT ${currentTime.toFixed(2)}s...`);
+    try {
+      if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const res = await invoke<SnapshotResult>("export_frame_snapshot_cmd", {
+          sourcePath: filePath,
+          timestampSec: currentTime,
+          outputPathOverride: null,
+        });
+        setStatusMessage(`SNAPSHOT SAVED (${res.elapsed_ms.toFixed(1)}ms): ${res.output_path}`);
+      } else {
+        setStatusMessage("DESKTOP TAURI RUNTIME REQUIRED FOR FRAME SNAPSHOT");
+      }
+    } catch (err) {
+      setStatusMessage(`SNAPSHOT FAILED: ${err}`);
+    }
+  }, [filePath, currentTime]);
+
   // Keyboard shortcuts
   useShortcuts({
     togglePlay: () => setIsPlaying((prev) => !prev),
@@ -901,6 +926,7 @@ export const App: React.FC = () => {
     undo: handleUndo,
     redo: handleRedo,
     openFile: handleOpenMediaDialog,
+    exportSnapshot: handleExportFrameSnapshot,
   });
 
   const fileNameOnly = filePath ? filePath.split(/[/\\]/).pop() : null;
@@ -958,7 +984,7 @@ export const App: React.FC = () => {
               SnipFlow
             </span>
             <span className="text-[10px] font-mono text-zinc-500 px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.06]">
-              v0.7.0
+              v0.7.1
             </span>
           </div>
 
@@ -1172,6 +1198,7 @@ export const App: React.FC = () => {
                   onEnded={() => setIsPlaying(false)}
                   onCyclePlaybackRate={handleCyclePlaybackRate}
                   onToggleSkipSilencePreview={handleToggleSkipSilencePreview}
+                  onSnapshot={handleExportFrameSnapshot}
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center bg-[#070709] rounded-xl border border-white/[0.06] font-mono text-xs text-zinc-500">
@@ -1344,6 +1371,12 @@ export const App: React.FC = () => {
               X
             </kbd>{" "}
             Split
+          </span>
+          <span>
+            <kbd className="px-1 py-0.2 rounded bg-white/[0.05] border border-white/[0.08] text-zinc-300">
+              P
+            </kbd>{" "}
+            Snapshot
           </span>
           <span>
             <kbd className="px-1 py-0.2 rounded bg-white/[0.05] border border-white/[0.08] text-zinc-300">
