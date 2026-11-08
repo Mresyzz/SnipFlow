@@ -18,6 +18,7 @@ interface ShortcutActions {
   zoomOut?: () => void;
   undo?: () => void;
   redo?: () => void;
+  openFile?: () => void;
 }
 
 export function useShortcuts({
@@ -38,6 +39,7 @@ export function useShortcuts({
   zoomOut,
   undo,
   redo,
+  openFile,
 }: ShortcutActions) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -64,6 +66,14 @@ export function useShortcuts({
         if (redo) {
           e.preventDefault();
           redo();
+        }
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.code === "KeyO") {
+        if (openFile) {
+          e.preventDefault();
+          openFile();
         }
         return;
       }
@@ -167,5 +177,6 @@ export function useShortcuts({
     zoomOut,
     undo,
     redo,
+    openFile,
   ]);
 }

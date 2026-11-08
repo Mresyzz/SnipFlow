@@ -16,7 +16,7 @@ import {
   ContainerFormat,
   CutMode,
 } from "./types";
-import { AlertTriangle, FolderOpen, Play, X, Scissors } from "lucide-react";
+import { AlertTriangle, FolderOpen, Play, X, Scissors, FileVideo } from "lucide-react";
 
 /**
  * Computes active speech intervals by inverting silent intervals with natural breath padding.
@@ -54,6 +54,33 @@ function computeActiveSegmentsWithPadding(
   }
 
   return active;
+}
+
+/**
+ * Converts discrete highlight peaks into merged, non-overlapping clip intervals `[peak - pre, peak + post]`.
+ */
+function buildHighlightSegmentsFromPeaks(
+  peaks: number[],
+  totalDuration: number,
+  preRoll: number = 2.5,
+  postRoll: number = 4.5
+): [number, number][] {
+  if (peaks.length === 0 || totalDuration <= 0) return [];
+  const sorted = [...peaks].sort((a, b) => a - b);
+  const merged: [number, number][] = [];
+
+  for (const p of sorted) {
+    const start = Math.max(0, Number((p - preRoll).toFixed(2)));
+    const end = Math.min(totalDuration, Number((p + postRoll).toFixed(2)));
+    if (end <= start) continue;
+
+    if (merged.length > 0 && start <= merged[merged.length - 1][1] + 0.25) {
+      merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], end);
+    } else {
+      merged.push([start, end]);
+    }
+  }
+  return merged;
 }
 
 /**
@@ -96,6 +123,7 @@ export const App: React.FC = () => {
   const [keyframes, setKeyframes] = useState<number[]>([]);
   const [silenceIntervals, setSilenceIntervals] = useState<[number, number][]>([]);
   const [activeSegments, setActiveSegments] = useState<[number, number][]>([]);
+  const [selectedClipIndex, setSelectedClipIndex] = useState<number | null>(null);
   const [audioTracks, setAudioTracks] = useState<AudioStreamInfo[]>([]);
   const [selectedTrackIndex, setSelectedTrackIndex] = useState<number>(0);
   const [peakHighlights, setPeakHighlights] = useState<number[]>([]);
@@ -140,10 +168,16 @@ export const App: React.FC = () => {
       const previousState = prevUndo[prevUndo.length - 1];
       setRedoStack((prevRedo) => [...prevRedo, activeSegments]);
       setActiveSegments(previousState);
+      if (previousState.length > 0) {
+        const idx = Math.min(selectedClipIndex ?? 0, previousState.length - 1);
+        setSelectedClipIndex(idx);
+        setInPoint(previousState[idx][0]);
+        setOutPoint(previousState[idx][1]);
+      }
       setStatusMessage(`UNDO OK -> RESTORED ${previousState.length} CLIPS`);
       return prevUndo.slice(0, -1);
     });
-  }, [activeSegments]);
+  }, [activeSegments, selectedClipIndex]);
 
   const handleRedo = useCallback(() => {
     setRedoStack((prevRedo) => {
@@ -154,10 +188,54 @@ export const App: React.FC = () => {
       const nextState = prevRedo[prevRedo.length - 1];
       setUndoStack((prevUndo) => [...prevUndo, activeSegments]);
       setActiveSegments(nextState);
+      if (nextState.length > 0) {
+        const idx = Math.min(selectedClipIndex ?? 0, nextState.length - 1);
+        setSelectedClipIndex(idx);
+        setInPoint(nextState[idx][0]);
+        setOutPoint(nextState[idx][1]);
+      }
       setStatusMessage(`REDO OK -> RESTORED ${nextState.length} CLIPS`);
       return prevRedo.slice(0, -1);
     });
-  }, [activeSegments]);
+  }, [activeSegments, selectedClipIndex]);
+
+  // Update In-Point and synchronize with active selected clip
+  const handleUpdateInPoint = useCallback(
+    (newIn: number) => {
+      setInPoint(newIn);
+      if (selectedClipIndex !== null) {
+        setActiveSegments((prev) => {
+          if (selectedClipIndex < 0 || selectedClipIndex >= prev.length) return prev;
+          const next = [...prev];
+          const currentOut = next[selectedClipIndex][1];
+          if (newIn < currentOut - 0.05) {
+            next[selectedClipIndex] = [newIn, currentOut];
+          }
+          return next;
+        });
+      }
+    },
+    [selectedClipIndex]
+  );
+
+  // Update Out-Point and synchronize with active selected clip
+  const handleUpdateOutPoint = useCallback(
+    (newOut: number) => {
+      setOutPoint(newOut);
+      if (selectedClipIndex !== null) {
+        setActiveSegments((prev) => {
+          if (selectedClipIndex < 0 || selectedClipIndex >= prev.length) return prev;
+          const next = [...prev];
+          const currentIn = next[selectedClipIndex][0];
+          if (newOut > currentIn + 0.05) {
+            next[selectedClipIndex] = [currentIn, newOut];
+          }
+          return next;
+        });
+      }
+    },
+    [selectedClipIndex]
+  );
 
   // Check multimedia runtime environment on startup
   useEffect(() => {
@@ -182,6 +260,7 @@ export const App: React.FC = () => {
       setIsLoading(true);
       setUndoStack([]);
       setRedoStack([]);
+      setSelectedClipIndex(0);
       setStatusMessage("PARALLEL DEMUXING STREAM & SCANNING INTERVALS...");
 
       try {
@@ -212,9 +291,11 @@ export const App: React.FC = () => {
           setWaveformPeaks(res.waveform_peaks || []);
 
           if (res.active_segments.length > 0) {
+            setSelectedClipIndex(0);
             setInPoint(res.active_segments[0][0]);
             setOutPoint(res.active_segments[0][1]);
           } else {
+            setSelectedClipIndex(null);
             setInPoint(0);
             setOutPoint(Math.min(res.duration, 10));
           }
@@ -240,6 +321,21 @@ export const App: React.FC = () => {
     },
     [noiseDb, minSilenceDuration, selectedTrackIndex]
   );
+
+  // Open native file dialog to switch/open another video (Shortcut: Ctrl+O)
+  const handleOpenMediaDialog = useCallback(async () => {
+    if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const selected = await invoke<string | null>("select_video_file_cmd");
+        if (selected) {
+          handleFileSelected(selected);
+        }
+      } catch (e) {
+        console.error("Open file dialog error:", e);
+      }
+    }
+  }, [handleFileSelected]);
 
   // Listen for native OS window file drop events
   useEffect(() => {
@@ -276,31 +372,64 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // Race-condition-safe helper for running silence rescan
+  // Race-condition-safe helper for running silence rescan (and optional waveform refresh)
   const executeSilenceRescan = useCallback(
-    async (targetDb: number, targetMinDur: number, targetTrack: number) => {
+    async (
+      targetDb: number,
+      targetMinDur: number,
+      targetTrack: number,
+      refreshWaveform: boolean = false
+    ) => {
       if (!filePath) return;
       const reqId = ++rescanReqIdRef.current;
 
       try {
         if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
           const { invoke } = await import("@tauri-apps/api/core");
-          const silences = await invoke<[number, number][]>("rescan_silence_cmd", {
-            filePath,
-            noiseDb: targetDb,
-            minSilenceDuration: targetMinDur,
-            trackIndex: targetTrack,
-          });
 
-          // Discard stale out-of-order responses
-          if (reqId !== rescanReqIdRef.current) return;
+          if (refreshWaveform) {
+            const [silences, waves] = await Promise.all([
+              invoke<[number, number][]>("rescan_silence_cmd", {
+                filePath,
+                noiseDb: targetDb,
+                minSilenceDuration: targetMinDur,
+                trackIndex: targetTrack,
+              }),
+              invoke<number[]>("extract_track_waveform_cmd", {
+                filePath,
+                trackIndex: targetTrack,
+              }),
+            ]);
 
-          setSilenceIntervals(silences);
-          const updatedActive = computeActiveSegmentsWithPadding(silences, duration, 0.06);
-          setActiveSegments(updatedActive);
-          setStatusMessage(
-            `RESCANNED (${targetDb}dB, MIN ${targetMinDur}s): ${silences.length} SILENCES · ${updatedActive.length} ACTIVE CLIPS`
-          );
+            if (reqId !== rescanReqIdRef.current) return;
+            setSilenceIntervals(silences);
+            setWaveformPeaks(waves);
+            const updatedActive = computeActiveSegmentsWithPadding(silences, duration, 0.06);
+            setActiveSegments(updatedActive);
+            if (updatedActive.length > 0) {
+              setSelectedClipIndex(0);
+              setInPoint(updatedActive[0][0]);
+              setOutPoint(updatedActive[0][1]);
+            }
+            setStatusMessage(
+              `SWITCHED TRACK #${targetTrack + 1}: ${silences.length} SILENCES · ${updatedActive.length} ACTIVE CLIPS`
+            );
+          } else {
+            const silences = await invoke<[number, number][]>("rescan_silence_cmd", {
+              filePath,
+              noiseDb: targetDb,
+              minSilenceDuration: targetMinDur,
+              trackIndex: targetTrack,
+            });
+
+            if (reqId !== rescanReqIdRef.current) return;
+            setSilenceIntervals(silences);
+            const updatedActive = computeActiveSegmentsWithPadding(silences, duration, 0.06);
+            setActiveSegments(updatedActive);
+            setStatusMessage(
+              `RESCANNED (${targetDb}dB, MIN ${targetMinDur}s): ${silences.length} SILENCES · ${updatedActive.length} ACTIVE CLIPS`
+            );
+          }
         }
       } catch (e) {
         console.error("Rescan failed", e);
@@ -309,12 +438,12 @@ export const App: React.FC = () => {
     [filePath, duration]
   );
 
-  // Switch active audio track and recompute active segments
+  // Switch active audio track and concurrently recompute silence + waveform envelope
   const handleSelectTrack = async (trackIdx: number) => {
     setSelectedTrackIndex(trackIdx);
     if (!filePath) return;
-    setStatusMessage(`SCANNING TRACK #${trackIdx + 1}...`);
-    await executeSilenceRescan(noiseDb, minSilenceDuration, trackIdx);
+    setStatusMessage(`SCANNING TRACK #${trackIdx + 1} SILENCE & WAVEFORM...`);
+    await executeSilenceRescan(noiseDb, minSilenceDuration, trackIdx, true);
   };
 
   // Debounced silence threshold slider adjustment (prevents FFmpeg process storm & race conditions)
@@ -327,7 +456,7 @@ export const App: React.FC = () => {
         clearTimeout(debounceTimerRef.current);
       }
       debounceTimerRef.current = setTimeout(() => {
-        executeSilenceRescan(newDb, minSilenceDuration, selectedTrackIndex);
+        executeSilenceRescan(newDb, minSilenceDuration, selectedTrackIndex, false);
       }, 180);
     },
     [filePath, minSilenceDuration, selectedTrackIndex, executeSilenceRescan]
@@ -338,7 +467,7 @@ export const App: React.FC = () => {
     (newMinDur: number) => {
       setMinSilenceDuration(newMinDur);
       if (!filePath) return;
-      executeSilenceRescan(noiseDb, newMinDur, selectedTrackIndex);
+      executeSilenceRescan(noiseDb, newMinDur, selectedTrackIndex, false);
     },
     [filePath, noiseDb, selectedTrackIndex, executeSilenceRescan]
   );
@@ -355,6 +484,26 @@ export const App: React.FC = () => {
     setStatusMessage(`JUMPED TO PEAK AT ${target.toFixed(2)}s`);
   }, [peakHighlights, currentTime]);
 
+  // Convert all detected peak highlights into active highlight reel clips (-2.5s to +4.5s)
+  const handleBuildHighlightReel = useCallback(() => {
+    if (peakHighlights.length === 0) {
+      setStatusMessage("NO PEAK HIGHLIGHTS AVAILABLE FOR REEL");
+      return;
+    }
+    const reelSegments = buildHighlightSegmentsFromPeaks(peakHighlights, duration, 2.5, 4.5);
+    if (reelSegments.length === 0) return;
+
+    pushUndoSnapshot(activeSegments);
+    setActiveSegments(reelSegments);
+    setSelectedClipIndex(0);
+    setInPoint(reelSegments[0][0]);
+    setOutPoint(reelSegments[0][1]);
+    setCurrentTime(reelSegments[0][0]);
+    setStatusMessage(
+      `BUILT HIGHLIGHT REEL: ${reelSegments.length} CLIPS FROM ${peakHighlights.length} PEAKS (CTRL+Z TO RESTORE)`
+    );
+  }, [peakHighlights, duration, activeSegments, pushUndoSnapshot]);
+
   // Snap In-point to closest keyframe (I-frame)
   const handleSnapInToKeyframe = useCallback(() => {
     if (keyframes.length === 0 || inPoint === null) return;
@@ -367,10 +516,11 @@ export const App: React.FC = () => {
         closest = kf;
       }
     }
-    setInPoint(closest);
+    pushUndoSnapshot(activeSegments);
+    handleUpdateInPoint(closest);
     setCurrentTime(closest);
     setStatusMessage(`SNAPPED IN-POINT TO I-FRAME AT ${closest.toFixed(3)}s`);
-  }, [keyframes, inPoint]);
+  }, [keyframes, inPoint, activeSegments, pushUndoSnapshot, handleUpdateInPoint]);
 
   // Seek to previous / next I-frame (Shift + Left / Right)
   const handleSeekPrevKeyframe = useCallback(() => {
@@ -394,11 +544,14 @@ export const App: React.FC = () => {
     if (activeSegments.length === 0) return;
     const nextSegments: [number, number][] = [];
     let sliced = false;
+    let newSelectedIdx = selectedClipIndex;
 
-    for (const [s, e] of activeSegments) {
+    for (let i = 0; i < activeSegments.length; i++) {
+      const [s, e] = activeSegments[i];
       if (!sliced && currentTime > s + 0.15 && currentTime < e - 0.15) {
         nextSegments.push([s, currentTime]);
         nextSegments.push([currentTime, e]);
+        newSelectedIdx = nextSegments.length - 1;
         sliced = true;
       } else {
         nextSegments.push([s, e]);
@@ -408,11 +561,16 @@ export const App: React.FC = () => {
     if (sliced) {
       pushUndoSnapshot(activeSegments);
       setActiveSegments(nextSegments);
+      if (newSelectedIdx !== null && nextSegments[newSelectedIdx]) {
+        setSelectedClipIndex(newSelectedIdx);
+        setInPoint(nextSegments[newSelectedIdx][0]);
+        setOutPoint(nextSegments[newSelectedIdx][1]);
+      }
       setStatusMessage(`SLICED CLIP AT PLAYHEAD (${currentTime.toFixed(2)}s) -> ${nextSegments.length} CLIPS`);
     } else {
       setStatusMessage("PLAYHEAD MUST BE INSIDE AN ACTIVE CLIP TO SLICE (X)");
     }
-  }, [activeSegments, currentTime, pushUndoSnapshot]);
+  }, [activeSegments, currentTime, selectedClipIndex, pushUndoSnapshot]);
 
   // Cycle playback speed 1.0x -> 1.5x -> 2.0x -> 4.0x
   const handleCyclePlaybackRate = useCallback(() => {
@@ -465,6 +623,11 @@ export const App: React.FC = () => {
         setSilenceIntervals(silences);
         const updatedActive = computeActiveSegmentsWithPadding(silences, duration, 0.06);
         setActiveSegments(updatedActive);
+        if (updatedActive.length > 0) {
+          setSelectedClipIndex(0);
+          setInPoint(updatedActive[0][0]);
+          setOutPoint(updatedActive[0][1]);
+        }
 
         setStatusMessage(
           `AUTO-CALIBRATED: MEAN ${profile.mean_volume_db}dB · MAX ${profile.max_volume_db}dB · REC ${profile.recommended_silence_db}dB (${updatedActive.length} CLIPS)`
@@ -502,31 +665,55 @@ export const App: React.FC = () => {
   const handleStripSilence = useCallback(() => {
     if (activeSegments.length > 0) {
       const [start, end] = activeSegments[0];
+      setSelectedClipIndex(0);
       setInPoint(start);
       setOutPoint(end);
       setCurrentTime(start);
-      setStatusMessage(`ACTIVE SEGMENT: ${start.toFixed(2)}s -> ${end.toFixed(2)}s`);
+      setStatusMessage(`ACTIVE SEGMENT #1: ${start.toFixed(2)}s -> ${end.toFixed(2)}s`);
     } else {
       setStatusMessage("NO SILENT INTERVALS DETECTED");
     }
   }, [activeSegments]);
 
-  // Jump to specific segment
-  const handleSelectSegment = useCallback((start: number, end: number) => {
+  // Jump to specific segment and bind it for active In/Out handle trimming
+  const handleSelectSegment = useCallback((idx: number, start: number, end: number) => {
+    setSelectedClipIndex(idx);
     setInPoint(start);
     setOutPoint(end);
     setCurrentTime(start);
-    setStatusMessage(`SEEKED SEGMENT: ${start.toFixed(2)}s -> ${end.toFixed(2)}s`);
+    setStatusMessage(`SELECTED CLIP #${idx + 1}: ${start.toFixed(2)}s -> ${end.toFixed(2)}s`);
   }, []);
+
+  // Double-click timeline to automatically select the clip containing that timestamp
+  const handleDoubleClickTimeline = useCallback(
+    (time: number) => {
+      const idx = activeSegments.findIndex(([s, e]) => time >= s && time <= e);
+      if (idx !== -1) {
+        const [s, e] = activeSegments[idx];
+        handleSelectSegment(idx, s, e);
+      }
+    },
+    [activeSegments, handleSelectSegment]
+  );
 
   // Remove segment from active batch with Undo support
   const handleRemoveSegment = useCallback(
     (indexToRemove: number) => {
       pushUndoSnapshot(activeSegments);
-      setActiveSegments((prev) => prev.filter((_, idx) => idx !== indexToRemove));
+      setActiveSegments((prev) => {
+        const next = prev.filter((_, idx) => idx !== indexToRemove);
+        if (next.length === 0) {
+          setSelectedClipIndex(null);
+        } else if (selectedClipIndex !== null && selectedClipIndex >= next.length) {
+          setSelectedClipIndex(next.length - 1);
+          setInPoint(next[next.length - 1][0]);
+          setOutPoint(next[next.length - 1][1]);
+        }
+        return next;
+      });
       setStatusMessage(`REMOVED SEGMENT #${indexToRemove + 1} (CTRL+Z TO UNDO)`);
     },
-    [activeSegments, pushUndoSnapshot]
+    [activeSegments, selectedClipIndex, pushUndoSnapshot]
   );
 
   // Single cut export
@@ -689,15 +876,17 @@ export const App: React.FC = () => {
   useShortcuts({
     togglePlay: () => setIsPlaying((prev) => !prev),
     markIn: () => {
-      setInPoint(currentTime);
+      pushUndoSnapshot(activeSegments);
+      handleUpdateInPoint(currentTime);
       if (outPoint !== null && currentTime >= outPoint) {
-        setOutPoint(Math.min(duration, currentTime + 5.0));
+        handleUpdateOutPoint(Math.min(duration, currentTime + 5.0));
       }
     },
     markOut: () => {
-      setOutPoint(currentTime);
+      pushUndoSnapshot(activeSegments);
+      handleUpdateOutPoint(currentTime);
       if (inPoint !== null && currentTime <= inPoint) {
-        setInPoint(Math.max(0, currentTime - 5.0));
+        handleUpdateInPoint(Math.max(0, currentTime - 5.0));
       }
     },
     triggerExport: handleExport,
@@ -710,10 +899,11 @@ export const App: React.FC = () => {
     toggleSkipSilencePreview: handleToggleSkipSilencePreview,
     cyclePlaybackSpeed: handleCyclePlaybackRate,
     rewindShuttle: () => setCurrentTime((t) => Math.max(0, t - 2.0)),
-    zoomIn: () => setZoomLevel((z) => Math.min(8, z * 2)),
+    zoomIn: () => setZoomLevel((z) => Math.min(16, z * 2)),
     zoomOut: () => setZoomLevel((z) => Math.max(1, z / 2)),
     undo: handleUndo,
     redo: handleRedo,
+    openFile: handleOpenMediaDialog,
   });
 
   const fileNameOnly = filePath ? filePath.split(/[/\\]/).pop() : null;
@@ -742,11 +932,19 @@ export const App: React.FC = () => {
         <div className="flex items-center gap-2">
           <span className="font-bold tracking-widest text-zinc-100 text-[11px]">SNIPFLOW</span>
           <span className="text-zinc-600">/</span>
-          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">v0.5.0</span>
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">v0.6.0</span>
           {fileNameOnly && (
             <>
               <span className="text-zinc-700">|</span>
               <span className="text-zinc-300 text-[11px] truncate max-w-md">{fileNameOnly}</span>
+              <button
+                onClick={handleOpenMediaDialog}
+                className="flex items-center gap-1 px-1.5 py-0.5 ml-1 rounded bg-zinc-850 hover:bg-zinc-800 border border-zinc-750 text-[10px] text-zinc-300 hover:text-cyan-300 transition cursor-pointer"
+                title="Open / Switch Video File (Ctrl+O)"
+              >
+                <FileVideo className="w-2.5 h-2.5" />
+                <span>OPEN</span>
+              </button>
             </>
           )}
         </div>
@@ -819,8 +1017,13 @@ export const App: React.FC = () => {
                 isMagneticSnapEnabled={isMagneticSnapEnabled}
                 zoomLevel={zoomLevel}
                 onSeek={(t) => setCurrentTime(t)}
-                onChangeInPoint={(t) => setInPoint(t)}
-                onChangeOutPoint={(t) => setOutPoint(t)}
+                onChangeInPoint={handleUpdateInPoint}
+                onChangeOutPoint={handleUpdateOutPoint}
+                onTrimDragStart={() => pushUndoSnapshot(activeSegments)}
+                onWheelZoom={(dir) =>
+                  setZoomLevel((z) => (dir === "in" ? Math.min(16, z * 2) : Math.max(1, z / 2)))
+                }
+                onDoubleClickTime={handleDoubleClickTimeline}
                 onDragStart={() => setIsPlaying(false)}
               />
             </div>
@@ -843,7 +1046,7 @@ export const App: React.FC = () => {
                     </div>
                     {activeSegments.map(([s, e], idx) => {
                       const clipDur = Math.max(0, e - s);
-                      const isCurrent = inPoint !== null && Math.abs(inPoint - s) < 0.2;
+                      const isCurrent = selectedClipIndex === idx;
                       return (
                         <div
                           key={idx}
@@ -852,8 +1055,8 @@ export const App: React.FC = () => {
                               ? "bg-cyan-950/40 border-cyan-700 text-cyan-300"
                               : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850"
                           }`}
-                          onClick={() => handleSelectSegment(s, e)}
-                          title={`Jump to Clip #${idx + 1} (${s.toFixed(2)}s - ${e.toFixed(2)}s)`}
+                          onClick={() => handleSelectSegment(idx, s, e)}
+                          title={`Select Clip #${idx + 1} (${s.toFixed(2)}s - ${e.toFixed(2)}s) for trimming`}
                         >
                           <Play className="w-2.5 h-2.5 opacity-60" />
                           <span>#{idx + 1}</span>
@@ -863,6 +1066,7 @@ export const App: React.FC = () => {
                               ev.stopPropagation();
                               handleRemoveSegment(idx);
                             }}
+                            aria-label={`Exclude clip #${idx + 1} from export`}
                             className="hover:text-rose-400 ml-0.5 text-zinc-600 cursor-pointer"
                             title="Exclude clip from export (Ctrl+Z to Undo)"
                           >
@@ -925,23 +1129,26 @@ export const App: React.FC = () => {
                 onNoiseDbChange={handleNoiseDbChange}
                 onMinSilenceDurationChange={handleMinSilenceDurationChange}
                 onUndo={handleUndo}
-                onZoomIn={() => setZoomLevel((z) => Math.min(8, z * 2))}
+                onZoomIn={() => setZoomLevel((z) => Math.min(16, z * 2))}
                 onZoomOut={() => setZoomLevel((z) => Math.max(1, z / 2))}
                 onMarkIn={() => {
-                  setInPoint(currentTime);
+                  pushUndoSnapshot(activeSegments);
+                  handleUpdateInPoint(currentTime);
                   if (outPoint !== null && currentTime >= outPoint) {
-                    setOutPoint(Math.min(duration, currentTime + 5.0));
+                    handleUpdateOutPoint(Math.min(duration, currentTime + 5.0));
                   }
                 }}
                 onMarkOut={() => {
-                  setOutPoint(currentTime);
+                  pushUndoSnapshot(activeSegments);
+                  handleUpdateOutPoint(currentTime);
                   if (inPoint !== null && currentTime <= inPoint) {
-                    setInPoint(Math.max(0, currentTime - 5.0));
+                    handleUpdateInPoint(Math.max(0, currentTime - 5.0));
                   }
                 }}
                 onSnapInToKeyframe={handleSnapInToKeyframe}
                 onStripSilence={handleStripSilence}
                 onNextHighlight={handleNextHighlight}
+                onBuildHighlightReel={handleBuildHighlightReel}
                 onSelectOutputDir={handleSelectOutputDir}
                 onExportNleTimeline={handleExportNleTimeline}
                 onExport={handleExport}
@@ -965,7 +1172,7 @@ export const App: React.FC = () => {
           <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">S</kbd> LIVE SKIP</span>
           <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">X</kbd> SLICE</span>
           <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">CTRL+Z</kbd> UNDO</span>
-          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">I/O</kbd> IN/OUT</span>
+          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">CTRL+O</kbd> OPEN</span>
           <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">ENTER</kbd> EXPORT</span>
         </div>
       </footer>

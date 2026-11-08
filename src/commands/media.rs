@@ -35,7 +35,7 @@ pub struct MediaInspection {
 pub async fn select_video_file_cmd() -> Result<Option<String>, String> {
     tokio::task::spawn_blocking(|| {
         let file = rfd::FileDialog::new()
-            .add_filter("Video Files", &["mp4", "mkv", "mov", "webm", "avi", "flv", "ts"])
+            .add_filter("Video Files", &["mp4", "mkv", "mov", "webm", "avi", "flv", "ts", "m4v"])
             .set_title("Select Raw Video for Lossless Cut")
             .pick_file();
 
@@ -103,10 +103,10 @@ pub async fn inspect_media_cmd(
         }
 
         // 2. Probe total media duration and audio stream metadata
-        let duration = if validation.duration > 0.0 {
+        let probed_duration = if validation.duration > 0.0 {
             validation.duration
         } else {
-            get_duration(&path).map_err(|e| e.to_string())?
+            get_duration(&path).unwrap_or(0.0)
         };
         let audio_tracks = get_audio_streams(&path).unwrap_or_default();
         let has_audio = !audio_tracks.is_empty();
@@ -114,6 +114,7 @@ pub async fn inspect_media_cmd(
         let min_dur = min_silence_duration.unwrap_or(0.5);
 
         // 3. Execute read-only demux/analysis passes concurrently across CPU threads
+        // Uses 1200 high-density RMS waveform bins for sub-second precision at 8x-16x zoom
         let (keyframes, peak_highlights, silence_intervals, waveform_peaks) =
             std::thread::scope(|s| {
                 let kf_handle = s.spawn(|| get_keyframes(&path).unwrap_or_default());
@@ -127,7 +128,7 @@ pub async fn inspect_media_cmd(
                 });
                 let wave_handle = s.spawn(|| {
                     if has_audio {
-                        generate_waveform_peaks(&path, 300, track_index).unwrap_or_default()
+                        generate_waveform_peaks(&path, 1200, track_index).unwrap_or_default()
                     } else {
                         Vec::new()
                     }
@@ -140,6 +141,13 @@ pub async fn inspect_media_cmd(
                     wave_handle.join().unwrap_or_default(),
                 )
             });
+
+        // Fallback duration if MKV/TS header lacked format/stream duration
+        let duration = if probed_duration > 0.0 {
+            probed_duration
+        } else {
+            keyframes.last().copied().unwrap_or(60.0) + 1.0
+        };
 
         // 4. Invert silence intervals with 60ms natural breath padding to prevent consonant clipping
         let active_segments = if !silence_intervals.is_empty() {
@@ -213,6 +221,22 @@ pub async fn rescan_silence_cmd(
     })
     .await
     .map_err(|e| format!("Silence rescan failed: {e}"))?
+}
+
+#[command]
+pub async fn extract_track_waveform_cmd(
+    file_path: String,
+    track_index: Option<usize>,
+) -> Result<Vec<f32>, String> {
+    tokio::task::spawn_blocking(move || {
+        let path = PathBuf::from(&file_path);
+        if !path.exists() {
+            return Err(format!("File does not exist: {file_path}"));
+        }
+        generate_waveform_peaks(&path, 1200, track_index).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| format!("Waveform extraction failed: {e}"))?
 }
 
 #[command]

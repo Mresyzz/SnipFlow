@@ -162,3 +162,45 @@ pub fn merge_and_dedup_peaks(peaks: &mut [f64], min_cooldown_sec: f64) -> Vec<f6
 
     result
 }
+
+/// Converts discrete highlight timestamps into non-overlapping active clip intervals
+/// `[peak - pre_roll, peak + post_roll]` clamped to `[0.0, total_duration]`.
+pub fn build_highlight_segments(
+    peaks: &[f64],
+    total_duration: f64,
+    pre_roll: f64,
+    post_roll: f64,
+) -> Vec<(f64, f64)> {
+    if peaks.is_empty() || total_duration <= 0.0 {
+        return Vec::new();
+    }
+
+    let pre = pre_roll.max(0.5);
+    let post = post_roll.max(0.5);
+
+    let mut sorted = peaks.to_vec();
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut merged: Vec<(f64, f64)> = Vec::new();
+
+    for p in sorted {
+        let start = (p - pre).max(0.0);
+        let end = (p + post).min(total_duration);
+        if end <= start {
+            continue;
+        }
+
+        if let Some(last) = merged.last_mut() {
+            if start <= last.1 + 0.25 {
+                last.1 = last.1.max(end);
+                continue;
+            }
+        }
+        merged.push((
+            (start * 100.0).round() / 100.0,
+            (end * 100.0).round() / 100.0,
+        ));
+    }
+
+    merged
+}

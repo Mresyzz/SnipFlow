@@ -19,6 +19,35 @@ pub struct AudioStreamInfo {
     pub title: Option<String>,
 }
 
+/// Parses a duration string from either floating-point seconds (`"125.45"`)
+/// or Matroska/WebM tag format (`"00:02:05.450000000"`).
+pub fn parse_duration_tag_str(raw: &str) -> Option<f64> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("n/a") {
+        return None;
+    }
+
+    if let Ok(sec) = trimmed.parse::<f64>() {
+        if sec.is_finite() && sec > 0.0 {
+            return Some(sec);
+        }
+    }
+
+    // Parse HH:MM:SS.mmmmmm format (used in MKV/WebM stream tags)
+    let parts: Vec<&str> = trimmed.split(':').collect();
+    if parts.len() == 3 {
+        let hh = parts[0].trim().parse::<f64>().ok()?;
+        let mm = parts[1].trim().parse::<f64>().ok()?;
+        let ss = parts[2].trim().parse::<f64>().ok()?;
+        let total = hh * 3600.0 + mm * 60.0 + ss;
+        if total.is_finite() && total > 0.0 {
+            return Some(total);
+        }
+    }
+
+    None
+}
+
 /// Resolves the absolute path for an FFmpeg multimedia binary.
 pub fn find_binary(binary_name: &str) -> Result<PathBuf> {
     // 1. Check custom environment override (e.g. SNIPFLOW_FFMPEG or FFMPEG_PATH)
@@ -142,24 +171,36 @@ pub fn run_command(command: &mut Command, desc: &str) -> Result<Output> {
     Ok(output)
 }
 
-/// Queries container stream duration in seconds using ffprobe.
+/// Queries container or stream duration in seconds using ffprobe with multi-tier fallback
+/// (format.duration -> stream.duration -> MKV stream tags.DURATION).
 pub fn get_duration(video_path: &Path) -> Result<f64> {
+    let validation = validate_media_file(video_path)?;
+    if validation.duration > 0.0 {
+        return Ok(validation.duration);
+    }
+
     let ffprobe_path = find_binary("ffprobe")?;
     let mut cmd = Command::new(ffprobe_path);
     cmd.args([
         "-v", "error",
-        "-show_entries", "format=duration",
+        "-show_entries", "format=duration:stream=duration:stream_tags=DURATION,duration",
         "-of", "default=noprint_wrappers=1:nokey=1",
     ]);
     cmd.arg(video_path);
 
     let output = run_command(&mut cmd, "ffprobe probe duration")?;
     let stdout_str = String::from_utf8_lossy(&output.stdout);
-    let trimmed = stdout_str.trim();
 
-    trimmed.parse::<f64>().map_err(|e| {
-        SnipFlowError::ParseError(format!("Failed to parse stream duration '{trimmed}': {e}"))
-    })
+    for line in stdout_str.lines() {
+        if let Some(sec) = parse_duration_tag_str(line) {
+            return Ok(sec);
+        }
+    }
+
+    Err(SnipFlowError::ParseError(format!(
+        "Unable to determine media duration for '{}'",
+        video_path.display()
+    )))
 }
 
 #[derive(Deserialize)]
@@ -239,6 +280,8 @@ struct FFprobeStreamSection {
     codec_name: Option<String>,
     width: Option<u32>,
     height: Option<u32>,
+    duration: Option<String>,
+    tags: Option<serde_json::Value>,
 }
 
 #[derive(Deserialize)]
@@ -351,11 +394,11 @@ pub fn validate_media_file(video_path: &Path) -> Result<MediaContainerValidation
         .and_then(|f| f.format_name.clone())
         .unwrap_or_else(|| "unknown".to_string());
 
-    let duration = parsed
+    let mut duration = parsed
         .format
         .as_ref()
-        .and_then(|f| f.duration.as_ref())
-        .and_then(|d| d.parse::<f64>().ok())
+        .and_then(|f| f.duration.as_deref())
+        .and_then(parse_duration_tag_str)
         .unwrap_or(0.0);
 
     let mut has_video = false;
@@ -367,6 +410,25 @@ pub fn validate_media_file(video_path: &Path) -> Result<MediaContainerValidation
 
     if let Some(streams) = parsed.streams {
         for s in streams {
+            // Fallback duration probe from stream metadata or MKV stream tags
+            if duration <= 0.0 {
+                if let Some(d_str) = s.duration.as_deref() {
+                    if let Some(d) = parse_duration_tag_str(d_str) {
+                        duration = duration.max(d);
+                    }
+                }
+                if let Some(tags) = s.tags.as_ref() {
+                    let tag_dur = tags
+                        .get("DURATION")
+                        .or_else(|| tags.get("duration"))
+                        .and_then(|v| v.as_str())
+                        .and_then(parse_duration_tag_str);
+                    if let Some(d) = tag_dur {
+                        duration = duration.max(d);
+                    }
+                }
+            }
+
             match s.codec_type.as_deref() {
                 Some("video") if !has_video => {
                     has_video = true;

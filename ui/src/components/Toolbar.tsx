@@ -14,6 +14,7 @@ import {
   Activity,
   FileCode,
   Undo2,
+  Flame,
 } from "lucide-react";
 import { AudioStreamInfo, ContainerFormat, CutMode } from "../types";
 
@@ -53,6 +54,7 @@ interface ToolbarProps {
   onSnapInToKeyframe: () => void;
   onStripSilence: () => void;
   onNextHighlight: () => void;
+  onBuildHighlightReel: () => void;
   onSelectOutputDir: () => void;
   onExportNleTimeline: () => void;
   onExport: () => void;
@@ -96,6 +98,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onSnapInToKeyframe,
   onStripSilence,
   onNextHighlight,
+  onBuildHighlightReel,
   onSelectOutputDir,
   onExportNleTimeline,
   onExport,
@@ -197,22 +200,22 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           </button>
         )}
 
-        {/* Timeline Zoom */}
+        {/* Timeline Zoom (up to 16x, also controllable via mouse wheel on timeline) */}
         <div className="flex items-center bg-zinc-950 px-1 py-0.5 rounded border border-zinc-800 ml-1">
           <button
             onClick={onZoomOut}
             disabled={zoomLevel <= 1}
             className="p-0.5 text-zinc-400 hover:text-zinc-200 disabled:opacity-30 cursor-pointer"
-            title="Zoom Out"
+            title="Zoom Out (- or Mouse Wheel)"
           >
             <ZoomOut className="w-3 h-3" />
           </button>
           <span className="text-[10px] text-zinc-500 px-1">{zoomLevel}x</span>
           <button
             onClick={onZoomIn}
-            disabled={zoomLevel >= 8}
+            disabled={zoomLevel >= 16}
             className="p-0.5 text-zinc-400 hover:text-zinc-200 disabled:opacity-30 cursor-pointer"
-            title="Zoom In"
+            title="Zoom In (+ or Mouse Wheel)"
           >
             <ZoomIn className="w-3 h-3" />
           </button>
@@ -232,16 +235,26 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       </div>
 
       {/* Middle: Audio Track & Silence Threshold & Auto-Calibration */}
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-1.5">
         {highlightCount > 0 && (
-          <button
-            onClick={onNextHighlight}
-            className="flex items-center gap-1 px-2 py-1 rounded bg-zinc-850 hover:bg-zinc-800 text-amber-400 border border-zinc-750 text-[11px] cursor-pointer"
-            title="Jump to Next Peak (H)"
-          >
-            <Sparkles className="w-3 h-3" />
-            <span>PEAK ({highlightCount})</span>
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={onNextHighlight}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-zinc-850 hover:bg-zinc-800 text-amber-400 border border-zinc-750 text-[11px] cursor-pointer"
+              title="Jump to Next Peak Highlight (H)"
+            >
+              <Sparkles className="w-3 h-3" />
+              <span>PEAK ({highlightCount})</span>
+            </button>
+            <button
+              onClick={onBuildHighlightReel}
+              className="flex items-center gap-1 px-2 py-1 rounded bg-amber-950/30 hover:bg-amber-900/40 text-amber-300 border border-amber-800/80 text-[10px] font-bold cursor-pointer transition"
+              title="Convert all detected multimodal peaks into active highlight clips (-2.5s to +4.5s around each peak) for instant Highlight Reel export (Ctrl+Z to Undo)"
+            >
+              <Flame className="w-3 h-3 text-amber-400" />
+              <span>REEL</span>
+            </button>
+          </div>
         )}
 
         {audioTracks.length > 1 && (

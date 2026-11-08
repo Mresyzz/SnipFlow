@@ -15,6 +15,9 @@ interface TimelineCanvasProps {
   onSeek: (time: number) => void;
   onChangeInPoint?: (time: number) => void;
   onChangeOutPoint?: (time: number) => void;
+  onTrimDragStart?: () => void;
+  onWheelZoom?: (direction: "in" | "out") => void;
+  onDoubleClickTime?: (time: number) => void;
   onDragStart?: () => void;
   onDragEnd?: () => void;
 }
@@ -35,6 +38,9 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
   onSeek,
   onChangeInPoint,
   onChangeOutPoint,
+  onTrimDragStart,
+  onWheelZoom,
+  onDoubleClickTime,
   onDragStart,
   onDragEnd,
 }) => {
@@ -118,19 +124,26 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     ctx.lineTo(width, 28);
     ctx.stroke();
 
-    // 2. Audio Waveform (Solid dense bars on track)
+    // 2. High-Density Audio Waveform Envelope (Adaptive 1200-bin rendering)
     if (waveformPeaks.length > 0) {
-      const barCount = waveformPeaks.length;
-      const barWidth = Math.max(1, width / barCount);
+      const binCount = waveformPeaks.length;
       const centerY = 58;
       const maxAmp = 24;
+      const targetBars = Math.min(binCount, Math.max(240, Math.floor(width / 2.2)));
+      const step = binCount / targetBars;
+      const barWidth = width / targetBars;
 
-      ctx.fillStyle = "#334155";
-      for (let i = 0; i < barCount; i++) {
-        const peak = waveformPeaks[i];
-        const bx = (i / barCount) * width;
-        const barHeight = Math.max(1.5, peak * maxAmp);
-        ctx.fillRect(bx, centerY - barHeight / 2, Math.max(1, barWidth - 0.5), barHeight);
+      ctx.fillStyle = "#3b4c63";
+      for (let i = 0; i < targetBars; i++) {
+        const startBin = Math.floor(i * step);
+        const endBin = Math.max(startBin + 1, Math.min(binCount, Math.floor((i + 1) * step)));
+        let localPeak = 0;
+        for (let b = startBin; b < endBin; b++) {
+          if (waveformPeaks[b] > localPeak) localPeak = waveformPeaks[b];
+        }
+        const bx = i * barWidth;
+        const barHeight = Math.max(1.5, localPeak * maxAmp * 2);
+        ctx.fillRect(bx, centerY - barHeight / 2, Math.max(1, barWidth - 0.6), barHeight);
       }
     }
 
@@ -169,7 +182,7 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     ctx.strokeStyle = "#3f3f46";
     ctx.lineWidth = 1;
     const baseInterval = duration > 600 ? 60 : duration > 60 ? 10 : 2;
-    const tickInterval = Math.max(0.2, baseInterval / zoomLevel);
+    const tickInterval = Math.max(0.1, baseInterval / zoomLevel);
 
     let lastLabelX = -100;
     for (let t = 0; t <= duration; t += tickInterval) {
@@ -299,6 +312,9 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     const rect = e.currentTarget.getBoundingClientRect();
     const hit = detectHitTarget(e.clientX, rect);
     setDragTarget(hit);
+    if ((hit === "in" || hit === "out") && onTrimDragStart) {
+      onTrimDragStart();
+    }
     if (onDragStart) onDragStart();
     e.currentTarget.setPointerCapture(e.pointerId);
     const targetTime = calculateTargetTime(e.clientX, rect);
@@ -326,16 +342,34 @@ export const TimelineCanvas: React.FC<TimelineCanvasProps> = ({
     }
   };
 
+  const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
+    if (!onWheelZoom) return;
+    if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+      e.preventDefault();
+      onWheelZoom(e.deltaY < 0 ? "in" : "out");
+    }
+  };
+
+  const handleDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (!onDoubleClickTime) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const targetTime = calculateTargetTime(e.clientX, rect);
+    onDoubleClickTime(targetTime);
+  };
+
   return (
     <div
       ref={scrollContainerRef}
       className="w-full relative select-none overflow-x-auto overflow-y-hidden rounded border border-zinc-800 bg-zinc-950"
+      title="Drag [ or ] handles to trim · Scroll wheel to zoom · Double-click to select clip under cursor"
     >
       <canvas
         ref={canvasRef}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
+        onWheel={handleWheel}
+        onDoubleClick={handleDoubleClick}
         onPointerLeave={() => {
           setHoverTime(null);
           setHoverTarget(null);

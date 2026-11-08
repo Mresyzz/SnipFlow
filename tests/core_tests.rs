@@ -1,9 +1,9 @@
 use snipflow::{
-    check_keyframe_alignment, find_nearest_keyframe, find_next_gop_boundary,
-    generate_cmx3600_edl_string, generate_fcpxml_string, invert_silence,
+    build_highlight_segments, check_keyframe_alignment, find_nearest_keyframe,
+    find_next_gop_boundary, generate_cmx3600_edl_string, generate_fcpxml_string, invert_silence,
     invert_silence_with_padding, lossless_cut_with_mode, merge_and_dedup_peaks,
-    parse_ebur128_peaks, parse_showinfo_scene_peaks, parse_silencedetect_logs,
-    parse_volumedetect_output, seconds_to_smpte, CutMode,
+    parse_duration_tag_str, parse_ebur128_peaks, parse_showinfo_scene_peaks,
+    parse_silencedetect_logs, parse_volumedetect_output, seconds_to_smpte, CutMode,
 };
 use std::path::Path;
 
@@ -168,8 +168,25 @@ fn test_nle_edl_and_fcpxml_generation() {
 
 #[test]
 fn test_same_path_overwrite_protection() {
-    // Using Cargo.toml as an existing dummy file to trigger distinct-path check before FFmpeg
     let existing = Path::new("Cargo.toml");
     let res = lossless_cut_with_mode(existing, 0.0, 5.0, existing, CutMode::StreamCopy);
     assert!(res.is_err(), "Exporting to the exact same path as source must be rejected");
+}
+
+#[test]
+fn test_parse_duration_tag_str() {
+    assert_eq!(parse_duration_tag_str("N/A"), None);
+    assert_eq!(parse_duration_tag_str(""), None);
+    assert_eq!(parse_duration_tag_str("125.5"), Some(125.5));
+    assert_eq!(parse_duration_tag_str("00:02:05.500000000"), Some(125.5));
+    assert_eq!(parse_duration_tag_str("01:00:00.00"), Some(3600.0));
+}
+
+#[test]
+fn test_build_highlight_segments() {
+    // Two close peaks at 10.0s and 14.0s (with pre=2.5, post=4.5 -> [7.5, 14.5] and [11.5, 18.5] merge into [7.5, 18.5])
+    // Third peak at 30.0s -> [27.5, 34.5]
+    let peaks = vec![10.0, 14.0, 30.0];
+    let segments = build_highlight_segments(&peaks, 40.0, 2.5, 4.5);
+    assert_eq!(segments, vec![(7.5, 18.5), (27.5, 34.5)]);
 }
