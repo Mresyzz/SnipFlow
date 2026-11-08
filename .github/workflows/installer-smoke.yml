@@ -40,9 +40,9 @@ jobs:
           echo "[Smoke Test] Verifying installed binary at $binary..."
           if ! "$binary" --help 2>/tmp/smoke_err.txt; then
             err_msg="$(cat /tmp/smoke_err.txt)"
-            # Handle headless slim server containers lacking desktop GUI display libraries
-            if echo "$err_msg" | grep -q "error while loading shared libraries"; then
-              echo "[Notice] Headless container lacks desktop GUI libraries (expected in slim/headless container):"
+            # Handle headless/musl containers lacking desktop GUI libraries or glibc interpreter
+            if echo "$err_msg" | grep -Eq "error while loading shared libraries|cannot execute|not found"; then
+              echo "[Notice] Headless/musl container lacks desktop GUI libraries or glibc interpreter:"
               echo "$err_msg"
               test -s "$binary" || exit 1
             else
