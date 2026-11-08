@@ -7,7 +7,7 @@
 <p align="center">
   <strong>Ultra-fast, local-first lossless video clipper & silence stripper powered by Rust and FFmpeg.</strong>
   <br />
-  <em>Hybrid Smart-GOP rendering. Voice-bandpass silence stripping. Industrial studio aesthetic.</em>
+  <em>Hybrid Smart-GOP rendering. Voice-bandpass silence stripping.</em>
 </p>
 
 <p align="center">
