@@ -158,18 +158,18 @@ fn test_cut_mode_serde() {
 
 #[test]
 fn test_nle_edl_and_fcpxml_generation() {
-    assert_eq!(seconds_to_smpte(0.0, 30.0), "00:00:00:00");
-    assert_eq!(seconds_to_smpte(65.5, 30.0), "00:01:05:15");
+    assert_eq!(seconds_to_smpte(0.0, 30), "00:00:00:00");
+    assert_eq!(seconds_to_smpte(65.5, 30), "00:01:05:15");
 
     let segments = vec![(1.0, 3.5), (5.0, 8.0)];
-    let edl = generate_cmx3600_edl_string(Path::new("demo_lecture.mp4"), &segments, 30.0);
-    assert!(edl.contains("TITLE: demo_lecture"));
+    let edl = generate_cmx3600_edl_string("demo_lecture.mp4", &segments, 30);
+    assert!(edl.contains("TITLE: SnipFlow_demo_lecture.mp4"));
     assert!(edl.contains("001  AX       AA/V  C"));
     assert!(edl.contains("* FROM CLIP NAME: demo_lecture.mp4"));
 
-    let xml = generate_fcpxml_string(Path::new("demo_lecture.mp4"), &segments, 12.0, 30);
+    let xml = generate_fcpxml_string(Path::new("demo_lecture.mp4"), &segments, 12.0);
     assert!(xml.contains("<fcpxml version=\"1.9\">"));
     assert!(xml.contains("demo_lecture.mp4"));
-    assert!(xml.contains("<asset-clip name=\"Clip 1\""));
-    assert!(xml.contains("<asset-clip name=\"Clip 2\""));
+    assert!(xml.contains("<asset-clip name=\"demo_lecture.mp4\""));
+    assert!(xml.contains("offset=\"0/1000s\" start=\"1000/1000s\" duration=\"2500/1000s\""));
 }

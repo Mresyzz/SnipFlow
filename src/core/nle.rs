@@ -27,15 +27,15 @@ pub fn generate_cmx3600_edl_string(
     lines.push("FCM: NON-DROP FRAME".to_string());
     lines.push(String::new());
 
-    let mut record_Timeline_pos = 0.0_f64;
+    let mut record_timeline_pos = 0.0_f64;
 
     for (idx, &(src_in, src_out)) in segments.iter().enumerate() {
         if src_out <= src_in {
             continue;
         }
         let seg_dur = src_out - src_in;
-        let rec_in = record_Timeline_pos;
-        let rec_out = record_Timeline_pos + seg_dur;
+        let rec_in = record_timeline_pos;
+        let rec_out = record_timeline_pos + seg_dur;
 
         let event_num = format!("{:03}", (idx + 1).min(999));
         let tc_src_in = seconds_to_smpte(src_in, safe_fps);
@@ -49,7 +49,7 @@ pub fn generate_cmx3600_edl_string(
         lines.push(format!("* FROM CLIP NAME: {clip_name}"));
         lines.push(String::new());
 
-        record_Timeline_pos = rec_out;
+        record_timeline_pos = rec_out;
     }
 
     lines.join("\n")
