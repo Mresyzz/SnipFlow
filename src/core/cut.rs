@@ -481,9 +481,7 @@ pub fn extract_frame_snapshot(
     run_command(&mut cmd, "ffmpeg frame snapshot")?;
 
     if !abs_output.is_file() {
-        return Err(SnipFlowError::ProcessFailed(
-            "Snapshot image file was not created by FFmpeg".to_string(),
-        ));
+        return Err(SnipFlowError::FileNotFound(abs_output));
     }
 
     Ok(())

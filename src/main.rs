@@ -24,7 +24,7 @@ fn is_supported_video_file(path: &Path) -> bool {
 }
 
 fn print_cli_help() {
-    println!("SnipFlow v0.7.1 - Zero-Reencode Video Clipper & Silence Stripper");
+    println!("SnipFlow v0.7.2 - Zero-Reencode Video Clipper & Silence Stripper");
     println!();
     println!("USAGE:");
     println!("  snipflow                                      Launch desktop studio GUI");

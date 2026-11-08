@@ -5,7 +5,7 @@ set -eu
 
 REPO="Mresyzz/SnipFlow"
 BINARY_NAME="snipflow"
-FALLBACK_VERSION="v0.7.1"
+FALLBACK_VERSION="v0.7.2"
 
 # 1. Determine installation directory
 INSTALL_DIR="${SNIPFLOW_INSTALL_DIR:-"$HOME/.local/bin"}"

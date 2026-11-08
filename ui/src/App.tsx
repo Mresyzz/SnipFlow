@@ -984,7 +984,7 @@ export const App: React.FC = () => {
               SnipFlow
             </span>
             <span className="text-[10px] font-mono text-zinc-500 px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.06]">
-              v0.7.1
+              v0.7.2
             </span>
           </div>
 
