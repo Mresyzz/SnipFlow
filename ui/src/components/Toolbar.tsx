@@ -13,6 +13,7 @@ import {
   FolderOpen,
   Activity,
   FileCode,
+  Undo2,
 } from "lucide-react";
 import { AudioStreamInfo, ContainerFormat, CutMode } from "../types";
 
@@ -23,6 +24,7 @@ interface ToolbarProps {
   keyframes: number[];
   isMagneticSnapEnabled: boolean;
   noiseDb: number;
+  minSilenceDuration: number;
   zoomLevel: number;
   isExporting: boolean;
   isCalibrating: boolean;
@@ -32,6 +34,7 @@ interface ToolbarProps {
   selectedTrackIndex: number;
   highlightCount: number;
   activeSegmentCount: number;
+  undoCount: number;
   customOutputDir: string | null;
   cutMode: CutMode;
   containerFormat: ContainerFormat;
@@ -41,6 +44,8 @@ interface ToolbarProps {
   onSelectTrack: (trackIndex: number) => void;
   onToggleMagneticSnap: () => void;
   onNoiseDbChange: (db: number) => void;
+  onMinSilenceDurationChange: (minDur: number) => void;
+  onUndo: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onMarkIn: () => void;
@@ -62,6 +67,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   keyframes,
   isMagneticSnapEnabled,
   noiseDb,
+  minSilenceDuration,
   zoomLevel,
   isExporting,
   isCalibrating,
@@ -71,6 +77,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   selectedTrackIndex,
   highlightCount,
   activeSegmentCount,
+  undoCount,
   customOutputDir,
   cutMode,
   containerFormat,
@@ -80,6 +87,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onSelectTrack,
   onToggleMagneticSnap,
   onNoiseDbChange,
+  onMinSilenceDurationChange,
+  onUndo,
   onZoomIn,
   onZoomOut,
   onMarkIn,
@@ -208,6 +217,18 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             <ZoomIn className="w-3 h-3" />
           </button>
         </div>
+
+        {/* Non-destructive Undo Button */}
+        {undoCount > 0 && (
+          <button
+            onClick={onUndo}
+            className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-850 hover:bg-zinc-800 text-zinc-300 border border-zinc-750 text-[10px] cursor-pointer ml-1"
+            title={`Undo last clip edit (Ctrl+Z) · ${undoCount} steps available`}
+          >
+            <Undo2 className="w-3 h-3 text-cyan-400" />
+            <span>UNDO</span>
+          </button>
+        )}
       </div>
 
       {/* Middle: Audio Track & Silence Threshold & Auto-Calibration */}
@@ -240,7 +261,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           </div>
         )}
 
-        {/* Silence Threshold & Auto-Calibration */}
+        {/* Silence Threshold & Min Silence Duration & Auto-Calibration */}
         <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
           <span className="text-zinc-500">THRESH</span>
           <span className="text-zinc-300 w-11 text-right">{noiseDb}dB</span>
@@ -253,6 +274,19 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             onChange={(e) => onNoiseDbChange(Number(e.target.value))}
             className="w-16 h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-zinc-400"
           />
+
+          {/* Minimum Silence Duration Selector */}
+          <select
+            value={minSilenceDuration}
+            onChange={(e) => onMinSilenceDurationChange(Number(e.target.value))}
+            className="bg-zinc-850 hover:bg-zinc-800 text-zinc-300 border border-zinc-750 rounded px-1 py-0.5 text-[10px] font-mono focus:outline-none cursor-pointer"
+            title="Minimum Pause Duration to Treat as Silence"
+          >
+            <option value={0.3} className="bg-zinc-900">MIN 0.3s</option>
+            <option value={0.5} className="bg-zinc-900">MIN 0.5s</option>
+            <option value={0.8} className="bg-zinc-900">MIN 0.8s</option>
+            <option value={1.2} className="bg-zinc-900">MIN 1.2s</option>
+          </select>
 
           {/* Auto Calibration Button */}
           <button

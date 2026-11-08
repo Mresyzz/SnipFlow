@@ -1,18 +1,14 @@
 use snipflow::{
     check_keyframe_alignment, find_nearest_keyframe, find_next_gop_boundary,
     generate_cmx3600_edl_string, generate_fcpxml_string, invert_silence,
-    invert_silence_with_padding, merge_and_dedup_peaks, parse_ebur128_peaks,
-    parse_showinfo_scene_peaks, parse_silencedetect_logs, parse_volumedetect_output,
-    seconds_to_smpte, CutMode,
+    invert_silence_with_padding, lossless_cut_with_mode, merge_and_dedup_peaks,
+    parse_ebur128_peaks, parse_showinfo_scene_peaks, parse_silencedetect_logs,
+    parse_volumedetect_output, seconds_to_smpte, CutMode,
 };
 use std::path::Path;
 
 #[test]
 fn test_invert_silence_with_padding() {
-    // Silence from 2.0 to 4.0 (2s long) and a tiny pause from 6.0 to 6.1 (0.1s long)
-    // With 0.1s padding:
-    // - First silence shrinks to [2.1, 3.9] -> speech ends at 2.1, resumes at 3.9
-    // - Second pause [6.0, 6.1] shrinks to [6.1, 6.0] (<=0), so it bridges seamlessly!
     let silence = vec![(2.0, 4.0), (6.0, 6.1)];
     let active = invert_silence_with_padding(&silence, 10.0, 0.1);
     assert_eq!(active.len(), 2);
@@ -98,10 +94,7 @@ fn test_find_nearest_keyframe() {
 fn test_find_next_gop_boundary() {
     let keyframes = vec![0.0, 2.0, 4.0, 6.0, 8.0, 10.0];
 
-    // Cut from 2.5s to 9.5s -> first keyframe after 2.5s is 4.0s
     assert_eq!(find_next_gop_boundary(&keyframes, 2.5, 9.5), Some(4.0));
-
-    // Cut entirely inside a single GOP (2.2s to 3.8s) -> no internal keyframe
     assert_eq!(find_next_gop_boundary(&keyframes, 2.2, 3.8), None);
 }
 
@@ -140,7 +133,6 @@ fn test_multimodal_highlights_parsing_and_dedup() {
 
     let mut combined = [audio_peaks, visual_peaks].concat();
     let merged = merge_and_dedup_peaks(&mut combined, 3.0);
-    // 5.2 is within 3.0s cooldown of 4.5, so it gets deduplicated; 12.8 and 20.0 remain
     assert_eq!(merged, vec![4.5, 12.8, 20.0]);
 }
 
@@ -172,4 +164,12 @@ fn test_nle_edl_and_fcpxml_generation() {
     assert!(xml.contains("demo_lecture.mp4"));
     assert!(xml.contains("<asset-clip name=\"demo_lecture.mp4\""));
     assert!(xml.contains("offset=\"0/1000s\" start=\"1000/1000s\" duration=\"2500/1000s\""));
+}
+
+#[test]
+fn test_same_path_overwrite_protection() {
+    // Using Cargo.toml as an existing dummy file to trigger distinct-path check before FFmpeg
+    let existing = Path::new("Cargo.toml");
+    let res = lossless_cut_with_mode(existing, 0.0, 5.0, existing, CutMode::StreamCopy);
+    assert!(res.is_err(), "Exporting to the exact same path as source must be rejected");
 }

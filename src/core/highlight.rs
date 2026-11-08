@@ -5,7 +5,7 @@ use crate::core::ffmpeg::{find_binary, get_audio_streams, run_command};
 use crate::error::{Result, SnipFlowError};
 
 /// Scans both audio transient loudness (EBU R128 with vocal/action bandpass) and video keyframe
-/// scene changes (`select='gt(scene,0.32)'`) to extract multimodal highlight timestamps in seconds.
+/// scene changes (`select='gt(scene,0.32)'`) concurrently to extract multimodal highlight timestamps.
 pub fn detect_peak_highlights(
     video_path: &Path,
     peak_threshold_lufs: f64,
@@ -14,23 +14,32 @@ pub fn detect_peak_highlights(
         return Err(SnipFlowError::FileNotFound(video_path.to_path_buf()));
     }
 
-    let mut combined_peaks = Vec::new();
-
-    // 1. Audio transient peak scan (if audio stream is present)
     let has_audio = get_audio_streams(video_path)
         .map(|tracks| !tracks.is_empty())
         .unwrap_or(false);
 
-    if has_audio {
-        if let Ok(audio_peaks) = detect_audio_ebur128_peaks(video_path, peak_threshold_lufs) {
-            combined_peaks.extend(audio_peaks);
-        }
-    }
+    // Run audio EBU R128 and visual I-frame scene-change scans in parallel threads
+    let (audio_res, visual_res) = std::thread::scope(|s| {
+        let audio_handle = s.spawn(|| {
+            if has_audio {
+                detect_audio_ebur128_peaks(video_path, peak_threshold_lufs).unwrap_or_default()
+            } else {
+                Vec::new()
+            }
+        });
+        let visual_handle = s.spawn(|| {
+            detect_visual_scene_highlights(video_path, 0.32).unwrap_or_default()
+        });
 
-    // 2. Visual keyframe scene-flux detection (captures silent screen transitions & visual bursts)
-    if let Ok(visual_peaks) = detect_visual_scene_highlights(video_path, 0.32) {
-        combined_peaks.extend(visual_peaks);
-    }
+        (
+            audio_handle.join().unwrap_or_default(),
+            visual_handle.join().unwrap_or_default(),
+        )
+    });
+
+    let mut combined_peaks = Vec::with_capacity(audio_res.len() + visual_res.len());
+    combined_peaks.extend(audio_res);
+    combined_peaks.extend(visual_res);
 
     Ok(merge_and_dedup_peaks(&mut combined_peaks, 3.0))
 }

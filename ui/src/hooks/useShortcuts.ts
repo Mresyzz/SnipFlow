@@ -16,6 +16,8 @@ interface ShortcutActions {
   rewindShuttle?: () => void;
   zoomIn?: () => void;
   zoomOut?: () => void;
+  undo?: () => void;
+  redo?: () => void;
 }
 
 export function useShortcuts({
@@ -34,6 +36,8 @@ export function useShortcuts({
   rewindShuttle,
   zoomIn,
   zoomOut,
+  undo,
+  redo,
 }: ShortcutActions) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -43,6 +47,24 @@ export function useShortcuts({
         (["INPUT", "TEXTAREA", "SELECT"].includes(target.tagName) ||
           target.isContentEditable)
       ) {
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.code === "KeyZ") {
+        e.preventDefault();
+        if (e.shiftKey && redo) {
+          redo();
+        } else if (undo) {
+          undo();
+        }
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.code === "KeyY") {
+        if (redo) {
+          e.preventDefault();
+          redo();
+        }
         return;
       }
 
@@ -143,5 +165,7 @@ export function useShortcuts({
     rewindShuttle,
     zoomIn,
     zoomOut,
+    undo,
+    redo,
   ]);
 }

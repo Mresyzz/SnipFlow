@@ -102,34 +102,46 @@ pub async fn inspect_media_cmd(
             return Err(validation.error_message.unwrap_or_else(|| "Invalid media container".to_string()));
         }
 
-        // 2. Probe total media duration
+        // 2. Probe total media duration and audio stream metadata
         let duration = if validation.duration > 0.0 {
             validation.duration
         } else {
             get_duration(&path).map_err(|e| e.to_string())?
         };
-
-        // 3. Extract keyframes without decoding non-keyframes
-        let keyframes = get_keyframes(&path).unwrap_or_default();
-
-        // 4. Audio tracks discovery
         let audio_tracks = get_audio_streams(&path).unwrap_or_default();
+        let has_audio = !audio_tracks.is_empty();
+        let db = noise_db.unwrap_or(-30.0);
+        let min_dur = min_silence_duration.unwrap_or(0.5);
 
-        // 5. Multimodal peak highlights (audio EBU R128 + visual scene transitions)
-        let peak_highlights = detect_peak_highlights(&path, -14.0).unwrap_or_default();
+        // 3. Execute read-only demux/analysis passes concurrently across CPU threads
+        let (keyframes, peak_highlights, silence_intervals, waveform_peaks) =
+            std::thread::scope(|s| {
+                let kf_handle = s.spawn(|| get_keyframes(&path).unwrap_or_default());
+                let hl_handle = s.spawn(|| detect_peak_highlights(&path, -14.0).unwrap_or_default());
+                let sil_handle = s.spawn(|| {
+                    if has_audio {
+                        detect_silence_track(&path, db, min_dur, track_index).unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    }
+                });
+                let wave_handle = s.spawn(|| {
+                    if has_audio {
+                        generate_waveform_peaks(&path, 300, track_index).unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    }
+                });
 
-        // 6. Audio silence detection and waveform peaks with silent video guard
-        let (silence_intervals, waveform_peaks) = if !audio_tracks.is_empty() {
-            let db = noise_db.unwrap_or(-30.0);
-            let min_dur = min_silence_duration.unwrap_or(0.5);
-            let silences = detect_silence_track(&path, db, min_dur, track_index).unwrap_or_default();
-            let waves = generate_waveform_peaks(&path, 300, track_index).unwrap_or_default();
-            (silences, waves)
-        } else {
-            (Vec::new(), Vec::new())
-        };
+                (
+                    kf_handle.join().unwrap_or_default(),
+                    hl_handle.join().unwrap_or_default(),
+                    sil_handle.join().unwrap_or_default(),
+                    wave_handle.join().unwrap_or_default(),
+                )
+            });
 
-        // 6. Invert silence intervals with 60ms natural breath padding to prevent consonant clipping
+        // 4. Invert silence intervals with 60ms natural breath padding to prevent consonant clipping
         let active_segments = if !silence_intervals.is_empty() {
             invert_silence_with_padding(&silence_intervals, duration, 0.06)
         } else {

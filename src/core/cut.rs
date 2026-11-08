@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use serde::{Deserialize, Serialize};
 use crate::core::ffmpeg::{find_binary, run_command};
@@ -19,6 +19,42 @@ impl Default for CutMode {
     fn default() -> Self {
         Self::StreamCopy
     }
+}
+
+/// Checks if output path points to the exact same file as input path to prevent source truncation.
+fn ensure_distinct_paths(video_path: &Path, output_path: &Path) -> Result<()> {
+    if video_path == output_path {
+        return Err(SnipFlowError::ParseError(
+            "Output path cannot be identical to source media path".to_string(),
+        ));
+    }
+    if let (Ok(canon_src), Ok(canon_dst)) = (video_path.canonicalize(), output_path.canonicalize()) {
+        if canon_src == canon_dst {
+            return Err(SnipFlowError::ParseError(
+                "Output path resolves to the same file as source media path".to_string(),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Resolves a potentially relative path against the process current working directory.
+fn resolve_abs_path(path: &Path) -> PathBuf {
+    if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        std::env::current_dir()
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join(path)
+    }
+}
+
+/// Checks whether the target container extension belongs to the MP4/MOV family supporting `+faststart`.
+fn is_mp4_family_container(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .map(|s| matches!(s.to_ascii_lowercase().as_str(), "mp4" | "mov" | "m4v"))
+        .unwrap_or(true)
 }
 
 /// Finds the first keyframe strictly after `start_sec` (beyond 1 frame margin) and before `end_sec`.
@@ -48,12 +84,7 @@ fn execute_single_cut(
 
     let start_str = format!("{:.3}", start);
     let duration_str = format!("{:.3}", end - start);
-
-    let is_mp4_family = output_path
-        .extension()
-        .and_then(|e| e.to_str())
-        .map(|s| matches!(s.to_ascii_lowercase().as_str(), "mp4" | "mov" | "m4v"))
-        .unwrap_or(true);
+    let is_mp4_family = is_mp4_family_container(output_path);
 
     if !exact_reencode {
         // Resilient zero-reencode stream copy with PTS regeneration and multi-track preservation
@@ -94,6 +125,7 @@ fn execute_single_cut(
             "-c:v", "libx264",
             "-preset", "ultrafast",
             "-crf", "18",
+            "-pix_fmt", "yuv420p",
             "-c:a", "copy",
             "-c:s", "copy",
             "-avoid_negative_ts", "make_zero",
@@ -108,16 +140,16 @@ fn execute_single_cut(
     Ok(())
 }
 
-/// Executes GOP micro-smart-rendering: re-encodes only the partial leading GOP up to the first
-/// I-frame, then performs a zero-reencode stream copy for the remaining body.
-fn execute_hybrid_smart_cut(
+/// Executes GOP micro-smart-rendering using a pre-extracted keyframe slice.
+/// Re-encodes only the partial leading GOP up to the first I-frame, then performs
+/// a zero-reencode stream copy for the remaining body.
+fn execute_hybrid_smart_cut_with_keyframes(
     video_path: &Path,
     start: f64,
     end: f64,
     output_path: &Path,
+    keyframes: &[f64],
 ) -> Result<()> {
-    let keyframes = get_keyframes(video_path).unwrap_or_default();
-
     // Check if `start` is already aligned to a keyframe within 18ms
     let is_start_aligned = keyframes.iter().any(|&kf| (kf - start).abs() < 0.018);
     if is_start_aligned {
@@ -125,7 +157,7 @@ fn execute_hybrid_smart_cut(
     }
 
     // Find next keyframe boundary inside [start, end]
-    let Some(next_kf) = find_next_gop_boundary(&keyframes, start, end) else {
+    let Some(next_kf) = find_next_gop_boundary(keyframes, start, end) else {
         // Entire clip falls within a single GOP; fallback to fast exact encode
         return execute_single_cut(video_path, start, end, output_path, true);
     };
@@ -144,6 +176,9 @@ fn execute_hybrid_smart_cut(
     let body_name = format!("gop_body.{ext_str}");
     let head_path = tmp_dir.join(&head_name);
     let body_path = tmp_dir.join(&body_name);
+    let concat_list_path = tmp_dir.join("concat_list.txt");
+    let abs_output_path = resolve_abs_path(output_path);
+    let is_mp4_family = is_mp4_family_container(&abs_output_path);
 
     let step_result = (|| -> Result<()> {
         // 1. Micro-render the partial leading GOP [start -> next_kf]
@@ -152,25 +187,29 @@ fn execute_hybrid_smart_cut(
         // 2. Zero-reencode stream copy the remaining body [next_kf -> end]
         execute_single_cut(video_path, next_kf, end, &body_path, false)?;
 
-        // 3. Stitch head and body via concat demuxer
+        // 3. Stitch head and body via concat demuxer (paths resolved relative to concat_list.txt dir)
         let concat_list = format!("file '{head_name}'\nfile '{body_name}'\n");
-        std::fs::write(tmp_dir.join("concat_list.txt"), concat_list)?;
+        std::fs::write(&concat_list_path, concat_list)?;
 
         let ffmpeg_path = find_binary("ffmpeg")?;
         let mut cmd = Command::new(ffmpeg_path);
-        cmd.current_dir(&tmp_dir);
         cmd.args([
             "-y",
             "-f", "concat",
             "-safe", "0",
-            "-i", "concat_list.txt",
+            "-i",
+        ]);
+        cmd.arg(&concat_list_path);
+        cmd.args([
             "-map", "0:v:0?",
             "-map", "0:a?",
             "-map", "0:s?",
             "-c", "copy",
-            "-movflags", "+faststart",
         ]);
-        cmd.arg(output_path);
+        if is_mp4_family {
+            cmd.args(["-movflags", "+faststart"]);
+        }
+        cmd.arg(&abs_output_path);
 
         run_command(&mut cmd, "ffmpeg smart-gop concat")?;
         Ok(())
@@ -180,7 +219,7 @@ fn execute_hybrid_smart_cut(
 
     // If hybrid stitch fails due to incompatible codec parameters in container, fallback to ExactFrame
     if step_result.is_err() {
-        return execute_single_cut(video_path, start, end, output_path, true);
+        return execute_single_cut(video_path, start, end, &abs_output_path, true);
     }
 
     Ok(())
@@ -202,6 +241,8 @@ pub fn lossless_cut_with_mode(
         return Err(SnipFlowError::InvalidTimeRange { start, end });
     }
 
+    ensure_distinct_paths(video_path, output_path)?;
+
     if let Some(parent) = output_path.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent)?;
@@ -210,7 +251,10 @@ pub fn lossless_cut_with_mode(
 
     match mode {
         CutMode::StreamCopy => execute_single_cut(video_path, start, end, output_path, false),
-        CutMode::SmartCopy => execute_hybrid_smart_cut(video_path, start, end, output_path),
+        CutMode::SmartCopy => {
+            let keyframes = get_keyframes(video_path).unwrap_or_default();
+            execute_hybrid_smart_cut_with_keyframes(video_path, start, end, output_path, &keyframes)
+        }
         CutMode::ExactFrame => execute_single_cut(video_path, start, end, output_path, true),
     }
 }
@@ -286,10 +330,19 @@ pub fn seamless_merge_with_mode(
         return Err(SnipFlowError::InvalidTimeRange { start: 0.0, end: 0.0 });
     }
 
+    ensure_distinct_paths(video_path, output_path)?;
+
     if segments.len() == 1 {
         let (s, e) = segments[0];
         return lossless_cut_with_mode(video_path, s, e, output_path, mode);
     }
+
+    // Pre-extract keyframes once when using SmartCopy to avoid N redundant ffprobe scans
+    let cached_keyframes = if mode == CutMode::SmartCopy {
+        get_keyframes(video_path).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
 
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -298,7 +351,11 @@ pub fn seamless_merge_with_mode(
     let tmp_dir = std::env::temp_dir().join(format!("snipflow_concat_{timestamp}"));
     std::fs::create_dir_all(&tmp_dir)?;
 
-    let extension = video_path.extension().unwrap_or_default().to_string_lossy();
+    let extension = output_path
+        .extension()
+        .or_else(|| video_path.extension())
+        .unwrap_or_default()
+        .to_string_lossy();
     let ext_str = if extension.is_empty() { "mp4" } else { &extension };
 
     let mut tmp_clips = Vec::new();
@@ -310,7 +367,24 @@ pub fn seamless_merge_with_mode(
         }
         let clip_file_name = format!("chunk_{:03}.{}", idx, ext_str);
         let clip_path = tmp_dir.join(&clip_file_name);
-        lossless_cut_with_mode(video_path, s, e, &clip_path, mode)?;
+
+        let cut_res = match mode {
+            CutMode::StreamCopy => execute_single_cut(video_path, s, e, &clip_path, false),
+            CutMode::SmartCopy => execute_hybrid_smart_cut_with_keyframes(
+                video_path,
+                s,
+                e,
+                &clip_path,
+                &cached_keyframes,
+            ),
+            CutMode::ExactFrame => execute_single_cut(video_path, s, e, &clip_path, true),
+        };
+
+        if let Err(err) = cut_res {
+            let _ = std::fs::remove_dir_all(&tmp_dir);
+            return Err(err);
+        }
+
         tmp_clips.push(clip_path);
         concat_entries.push(format!("file '{clip_file_name}'"));
     }
@@ -323,31 +397,34 @@ pub fn seamless_merge_with_mode(
     let concat_list_path = tmp_dir.join("concat_list.txt");
     std::fs::write(&concat_list_path, concat_entries.join("\n"))?;
 
-    let ffmpeg_path = find_binary("ffmpeg")?;
-    let mut cmd = Command::new(ffmpeg_path);
-
-    if let Some(parent) = output_path.parent() {
+    let abs_output_path = resolve_abs_path(output_path);
+    if let Some(parent) = abs_output_path.parent() {
         if !parent.as_os_str().is_empty() {
             std::fs::create_dir_all(parent)?;
         }
     }
 
-    cmd.current_dir(&tmp_dir);
+    let is_mp4_family = is_mp4_family_container(&abs_output_path);
+    let ffmpeg_path = find_binary("ffmpeg")?;
+    let mut cmd = Command::new(ffmpeg_path);
+
     cmd.args([
         "-y",
         "-f", "concat",
         "-safe", "0",
         "-i",
     ]);
-    cmd.arg("concat_list.txt");
+    cmd.arg(&concat_list_path);
     cmd.args([
         "-map", "0:v:0?",
         "-map", "0:a?",
         "-map", "0:s?",
         "-c", "copy",
-        "-movflags", "+faststart",
     ]);
-    cmd.arg(output_path);
+    if is_mp4_family {
+        cmd.args(["-movflags", "+faststart"]);
+    }
+    cmd.arg(&abs_output_path);
 
     let res = run_command(&mut cmd, "ffmpeg seamless concat");
 
