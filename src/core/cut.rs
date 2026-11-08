@@ -227,14 +227,41 @@ pub fn lossless_cut(
 
 /// Helper function: Computes active speech spans by inverting silence intervals over total duration.
 pub fn invert_silence(silence_intervals: &[(f64, f64)], total_duration: f64) -> Vec<(f64, f64)> {
+    invert_silence_with_padding(silence_intervals, total_duration, 0.0)
+}
+
+/// Computes active speech spans while retaining a natural breath padding (`padding_sec`) around
+/// vocal boundaries to prevent abrupt consonant clipping.
+pub fn invert_silence_with_padding(
+    silence_intervals: &[(f64, f64)],
+    total_duration: f64,
+    padding_sec: f64,
+) -> Vec<(f64, f64)> {
+    let pad = padding_sec.max(0.0);
     let mut active = Vec::new();
     let mut current_pos = 0.0;
 
     for &(silence_start, silence_end) in silence_intervals {
-        if silence_start > current_pos {
-            active.push((current_pos, silence_start));
+        let eff_start = if silence_start <= 0.001 {
+            0.0
+        } else {
+            silence_start + pad
+        };
+        let eff_end = if (total_duration - silence_end).abs() <= 0.001 {
+            total_duration
+        } else {
+            silence_end - pad
+        };
+
+        if eff_end <= eff_start {
+            // Pause is narrower than 2 * padding_sec; bridge speech seamlessly
+            continue;
         }
-        current_pos = current_pos.max(silence_end);
+
+        if eff_start > current_pos {
+            active.push((current_pos, eff_start.min(total_duration)));
+        }
+        current_pos = current_pos.max(eff_end);
     }
 
     if current_pos < total_duration {

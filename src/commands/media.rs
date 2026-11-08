@@ -4,8 +4,9 @@ use tauri::command;
 use snipflow::{
     check_keyframe_alignment, detect_peak_highlights, detect_silence_track, find_binary,
     find_nearest_keyframe, generate_waveform_peaks, get_audio_streams, get_duration,
-    get_internal_bin_dir, get_keyframes, invert_silence, probe_audio_volume, validate_media_file,
-    AudioStreamInfo, AudioVolumeProfile, KeyframeAlignment, MediaContainerValidation,
+    get_internal_bin_dir, get_keyframes, invert_silence_with_padding, probe_audio_volume,
+    validate_media_file, AudioStreamInfo, AudioVolumeProfile, KeyframeAlignment,
+    MediaContainerValidation,
 };
 
 #[derive(Serialize, Clone, Debug)]
@@ -128,9 +129,9 @@ pub async fn inspect_media_cmd(
             (Vec::new(), Vec::new())
         };
 
-        // 6. Invert silence intervals to calculate clean active speech segments
+        // 6. Invert silence intervals with 60ms natural breath padding to prevent consonant clipping
         let active_segments = if !silence_intervals.is_empty() {
-            invert_silence(&silence_intervals, duration)
+            invert_silence_with_padding(&silence_intervals, duration, 0.06)
         } else {
             vec![(0.0, duration)]
         };

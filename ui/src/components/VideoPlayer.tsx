@@ -1,13 +1,19 @@
 import React, { useRef, useEffect, useState } from "react";
-import { Play, Pause, Volume2, VolumeX, Maximize2, SkipBack, SkipForward } from "lucide-react";
+import { Play, Pause, Volume2, VolumeX, Maximize2, SkipBack, SkipForward, FastForward } from "lucide-react";
 
 interface VideoPlayerProps {
   src: string;
   isPlaying: boolean;
   currentTime: number;
   duration: number;
+  playbackRate: number;
+  skipSilencePreview: boolean;
+  silenceIntervals: [number, number][];
   onTimeUpdate: (time: number) => void;
   onTogglePlay: () => void;
+  onEnded: () => void;
+  onCyclePlaybackRate: () => void;
+  onToggleSkipSilencePreview: () => void;
 }
 
 export const VideoPlayer: React.FC<VideoPlayerProps> = ({
@@ -15,8 +21,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   isPlaying,
   currentTime,
   duration,
+  playbackRate,
+  skipSilencePreview,
+  silenceIntervals,
   onTimeUpdate,
   onTogglePlay,
+  onEnded,
+  onCyclePlaybackRate,
+  onToggleSkipSilencePreview,
 }) => {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [isMuted, setIsMuted] = useState(false);
@@ -32,6 +44,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
     }
   }, [isPlaying]);
 
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    video.playbackRate = playbackRate;
+  }, [playbackRate]);
+
   // Synchronize external seek with sub-frame precision
   useEffect(() => {
     const video = videoRef.current;
@@ -46,9 +64,25 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
   }, [currentTime, isPlaying]);
 
   const handleTimeUpdate = () => {
-    if (videoRef.current && isPlaying) {
-      onTimeUpdate(videoRef.current.currentTime);
+    const video = videoRef.current;
+    if (!video || !isPlaying) return;
+
+    const t = video.currentTime;
+
+    // Live Skip-Silence Audition: jump across silent dead-air in real time during playback
+    if (skipSilencePreview && silenceIntervals.length > 0) {
+      for (const [s, e] of silenceIntervals) {
+        const paddedStart = s + 0.05;
+        const paddedEnd = e - 0.05;
+        if (paddedEnd > paddedStart && t >= paddedStart && t < paddedEnd) {
+          video.currentTime = paddedEnd;
+          onTimeUpdate(paddedEnd);
+          return;
+        }
+      }
     }
+
+    onTimeUpdate(t);
   };
 
   const formatSMPTETimecode = (seconds: number) => {
@@ -70,12 +104,13 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         className="w-full h-full object-contain cursor-pointer"
         onClick={onTogglePlay}
         onTimeUpdate={handleTimeUpdate}
+        onEnded={onEnded}
         muted={isMuted}
         playsInline
       />
 
       {/* Embedded Studio Transport Bar (Compact 32px) */}
-      <div className="absolute bottom-0 left-0 right-0 h-8 px-3 bg-zinc-950/90 border-t border-zinc-850 flex items-center justify-between font-mono text-xs opacity-0 group-hover:opacity-100 transition-opacity">
+      <div className="absolute bottom-0 left-0 right-0 h-8 px-3 bg-zinc-950/90 border-t border-zinc-850 flex items-center justify-between font-mono text-xs opacity-95 group-hover:opacity-100 transition-opacity">
         <div className="flex items-center gap-1">
           {/* Step Back 1 Frame */}
           <button
@@ -84,7 +119,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               onTimeUpdate(Math.max(0, currentTime - 0.04));
             }}
             title="Step Back 1 Frame (Left Arrow)"
-            className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-850 transition"
+            className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-850 transition cursor-pointer"
           >
             <SkipBack className="w-3.5 h-3.5" />
           </button>
@@ -95,8 +130,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               e.stopPropagation();
               onTogglePlay();
             }}
-            title="Play / Pause (Space)"
-            className="p-1 rounded text-zinc-200 hover:text-cyan-400 hover:bg-zinc-850 transition"
+            title="Play / Pause (Space or K)"
+            className="p-1 rounded text-zinc-200 hover:text-cyan-400 hover:bg-zinc-850 transition cursor-pointer"
           >
             {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
           </button>
@@ -108,7 +143,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               onTimeUpdate(Math.min(duration, currentTime + 0.04));
             }}
             title="Step Forward 1 Frame (Right Arrow)"
-            className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-850 transition"
+            className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-850 transition cursor-pointer"
           >
             <SkipForward className="w-3.5 h-3.5" />
           </button>
@@ -126,13 +161,46 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Live Skip-Silence Audition Toggle */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleSkipSilencePreview();
+            }}
+            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border transition cursor-pointer ${
+              skipSilencePreview
+                ? "bg-emerald-950/40 border-emerald-700 text-emerald-400"
+                : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300"
+            }`}
+            title="Live Audition: Automatically skip silent intervals during playback (S)"
+          >
+            <FastForward className="w-3 h-3" />
+            <span>{skipSilencePreview ? "LIVE SKIP: ON" : "LIVE SKIP: OFF"}</span>
+          </button>
+
+          {/* Playback Speed Button */}
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              onCyclePlaybackRate();
+            }}
+            className={`px-1.5 py-0.5 rounded text-[10px] border transition cursor-pointer ${
+              playbackRate !== 1
+                ? "bg-cyan-950/40 border-cyan-700 text-cyan-300 font-bold"
+                : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200"
+            }`}
+            title="Cycle Playback Speed 1x / 1.5x / 2x / 4x (L)"
+          >
+            {playbackRate.toFixed(1)}x
+          </button>
+
           {/* Mute button */}
           <button
             onClick={(e) => {
               e.stopPropagation();
               setIsMuted(!isMuted);
             }}
-            className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850 transition"
+            className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850 transition cursor-pointer"
             title={isMuted ? "Unmute" : "Mute"}
           >
             {isMuted ? <VolumeX className="w-3.5 h-3.5 text-zinc-500" /> : <Volume2 className="w-3.5 h-3.5" />}
@@ -146,7 +214,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 videoRef.current.requestFullscreen();
               }
             }}
-            className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850 transition"
+            className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850 transition cursor-pointer"
             title="Fullscreen"
           >
             <Maximize2 className="w-3.5 h-3.5" />

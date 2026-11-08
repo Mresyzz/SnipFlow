@@ -8,6 +8,14 @@ interface ShortcutActions {
   onNextHighlight?: () => void;
   stepFrameForward?: () => void;
   stepFrameBackward?: () => void;
+  seekPrevKeyframe?: () => void;
+  seekNextKeyframe?: () => void;
+  sliceAtPlayhead?: () => void;
+  toggleSkipSilencePreview?: () => void;
+  cyclePlaybackSpeed?: () => void;
+  rewindShuttle?: () => void;
+  zoomIn?: () => void;
+  zoomOut?: () => void;
 }
 
 export function useShortcuts({
@@ -18,6 +26,14 @@ export function useShortcuts({
   onNextHighlight,
   stepFrameForward,
   stepFrameBackward,
+  seekPrevKeyframe,
+  seekNextKeyframe,
+  sliceAtPlayhead,
+  toggleSkipSilencePreview,
+  cyclePlaybackSpeed,
+  rewindShuttle,
+  zoomIn,
+  zoomOut,
 }: ShortcutActions) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -32,8 +48,21 @@ export function useShortcuts({
 
       switch (e.code) {
         case "Space":
+        case "KeyK":
           e.preventDefault();
           togglePlay();
+          break;
+        case "KeyJ":
+          if (rewindShuttle) {
+            e.preventDefault();
+            rewindShuttle();
+          }
+          break;
+        case "KeyL":
+          if (cyclePlaybackSpeed) {
+            e.preventDefault();
+            cyclePlaybackSpeed();
+          }
           break;
         case "KeyI":
           e.preventDefault();
@@ -42,6 +71,18 @@ export function useShortcuts({
         case "KeyO":
           e.preventDefault();
           markOut();
+          break;
+        case "KeyX":
+          if (sliceAtPlayhead) {
+            e.preventDefault();
+            sliceAtPlayhead();
+          }
+          break;
+        case "KeyS":
+          if (toggleSkipSilencePreview) {
+            e.preventDefault();
+            toggleSkipSilencePreview();
+          }
           break;
         case "KeyH":
           if (onNextHighlight) {
@@ -54,15 +95,31 @@ export function useShortcuts({
           triggerExport();
           break;
         case "ArrowRight":
-          if (stepFrameForward) {
-            e.preventDefault();
+          e.preventDefault();
+          if (e.shiftKey && seekNextKeyframe) {
+            seekNextKeyframe();
+          } else if (stepFrameForward) {
             stepFrameForward();
           }
           break;
         case "ArrowLeft":
-          if (stepFrameBackward) {
-            e.preventDefault();
+          e.preventDefault();
+          if (e.shiftKey && seekPrevKeyframe) {
+            seekPrevKeyframe();
+          } else if (stepFrameBackward) {
             stepFrameBackward();
+          }
+          break;
+        case "Equal":
+          if (zoomIn) {
+            e.preventDefault();
+            zoomIn();
+          }
+          break;
+        case "Minus":
+          if (zoomOut) {
+            e.preventDefault();
+            zoomOut();
           }
           break;
       }
@@ -70,5 +127,21 @@ export function useShortcuts({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [togglePlay, markIn, markOut, triggerExport, onNextHighlight, stepFrameForward, stepFrameBackward]);
+  }, [
+    togglePlay,
+    markIn,
+    markOut,
+    triggerExport,
+    onNextHighlight,
+    stepFrameForward,
+    stepFrameBackward,
+    seekPrevKeyframe,
+    seekNextKeyframe,
+    sliceAtPlayhead,
+    toggleSkipSilencePreview,
+    cyclePlaybackSpeed,
+    rewindShuttle,
+    zoomIn,
+    zoomOut,
+  ]);
 }

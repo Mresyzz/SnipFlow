@@ -1,8 +1,21 @@
 use snipflow::{
     check_keyframe_alignment, find_nearest_keyframe, find_next_gop_boundary, invert_silence,
-    merge_and_dedup_peaks, parse_ebur128_peaks, parse_showinfo_scene_peaks,
-    parse_silencedetect_logs, parse_volumedetect_output, CutMode,
+    invert_silence_with_padding, merge_and_dedup_peaks, parse_ebur128_peaks,
+    parse_showinfo_scene_peaks, parse_silencedetect_logs, parse_volumedetect_output, CutMode,
 };
+
+#[test]
+fn test_invert_silence_with_padding() {
+    // Silence from 2.0 to 4.0 (2s long) and a tiny pause from 6.0 to 6.1 (0.1s long)
+    // With 0.1s padding:
+    // - First silence shrinks to [2.1, 3.9] -> speech ends at 2.1, resumes at 3.9
+    // - Second pause [6.0, 6.1] shrinks to [6.1, 6.0] (<=0), so it bridges seamlessly!
+    let silence = vec![(2.0, 4.0), (6.0, 6.1)];
+    let active = invert_silence_with_padding(&silence, 10.0, 0.1);
+    assert_eq!(active.len(), 2);
+    assert!((active[0].0 - 0.0).abs() < 1e-4 && (active[0].1 - 2.1).abs() < 1e-4);
+    assert!((active[1].0 - 3.9).abs() < 1e-4 && (active[1].1 - 10.0).abs() < 1e-4);
+}
 
 #[test]
 fn test_invert_silence_all_silence() {

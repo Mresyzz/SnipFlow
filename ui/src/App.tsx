@@ -16,6 +16,44 @@ import {
 } from "./types";
 import { AlertTriangle, FolderOpen, Play, X, Scissors } from "lucide-react";
 
+/**
+ * Computes active speech intervals by inverting silent intervals with natural breath padding.
+ * Matches backend `invert_silence_with_padding` algorithm.
+ */
+function computeActiveSegmentsWithPadding(
+  silenceIntervals: [number, number][],
+  totalDuration: number,
+  paddingSec: number = 0.06
+): [number, number][] {
+  if (totalDuration <= 0) return [];
+  if (silenceIntervals.length === 0) return [[0, totalDuration]];
+
+  const pad = Math.max(0, paddingSec);
+  const active: [number, number][] = [];
+  let currentPos = 0.0;
+
+  for (const [silenceStart, silenceEnd] of silenceIntervals) {
+    const effStart = silenceStart <= 0.001 ? 0.0 : silenceStart + pad;
+    const effEnd =
+      Math.abs(totalDuration - silenceEnd) <= 0.001 ? totalDuration : silenceEnd - pad;
+
+    if (effEnd <= effStart) {
+      continue;
+    }
+
+    if (effStart > currentPos) {
+      active.push([currentPos, Math.min(totalDuration, effStart)]);
+    }
+    currentPos = Math.max(currentPos, effEnd);
+  }
+
+  if (currentPos < totalDuration) {
+    active.push([currentPos, totalDuration]);
+  }
+
+  return active;
+}
+
 export const App: React.FC = () => {
   const [filePath, setFilePath] = useState<string | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -26,6 +64,8 @@ export const App: React.FC = () => {
   const [duration, setDuration] = useState<number>(0);
   const [currentTime, setCurrentTime] = useState<number>(0);
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [playbackRate, setPlaybackRate] = useState<number>(1.0);
+  const [skipSilencePreview, setSkipSilencePreview] = useState<boolean>(false);
 
   const [keyframes, setKeyframes] = useState<number[]>([]);
   const [silenceIntervals, setSilenceIntervals] = useState<[number, number][]>([]);
@@ -110,14 +150,13 @@ export const App: React.FC = () => {
 
           const audioNote =
             res.audio_tracks.length === 0
-              ? " (SILENT VIDEO: NO AUDIO TRACKS)"
+              ? " (SILENT VIDEO: VISUAL SCENE HIGHLIGHTS ACTIVE)"
               : ` · ${res.audio_tracks.length} TRACKS`;
 
           setStatusMessage(
             `PARSED: ${res.keyframes.length} I-FRAMES · ${res.silence_intervals.length} SILENCES${audioNote}`
           );
         } else {
-          // Browser environment fallback
           if (blobUrl) setVideoUrl(blobUrl);
           setStatusMessage("RUNNING IN BROWSER: DESKTOP TAURI RUNTIME REQUIRED FOR STREAM DEMUXING");
         }
@@ -166,7 +205,7 @@ export const App: React.FC = () => {
     }
   }, []);
 
-  // Switch active audio track
+  // Switch active audio track and recompute active segments
   const handleSelectTrack = async (trackIdx: number) => {
     setSelectedTrackIndex(trackIdx);
     if (!filePath) return;
@@ -182,7 +221,11 @@ export const App: React.FC = () => {
           trackIndex: trackIdx,
         });
         setSilenceIntervals(silences);
-        setStatusMessage(`REFRESHED: ${silences.length} SILENCES ON TRACK #${trackIdx + 1}`);
+        const updatedActive = computeActiveSegmentsWithPadding(silences, duration, 0.06);
+        setActiveSegments(updatedActive);
+        setStatusMessage(
+          `REFRESHED TRACK #${trackIdx + 1}: ${silences.length} SILENCES · ${updatedActive.length} ACTIVE CLIPS`
+        );
       }
     } catch (e) {
       console.error("Track rescan failed", e);
@@ -218,7 +261,70 @@ export const App: React.FC = () => {
     setStatusMessage(`SNAPPED IN-POINT TO I-FRAME AT ${closest.toFixed(3)}s`);
   }, [keyframes, inPoint]);
 
-  // Re-scan silence on threshold slider adjustment
+  // Seek to previous / next I-frame (Shift + Left / Right)
+  const handleSeekPrevKeyframe = useCallback(() => {
+    if (keyframes.length === 0) return;
+    const prev = [...keyframes].reverse().find((kf) => kf < currentTime - 0.05);
+    const target = prev !== undefined ? prev : keyframes[0];
+    setCurrentTime(target);
+    setStatusMessage(`SEEKED PREVIOUS I-FRAME: ${target.toFixed(3)}s`);
+  }, [keyframes, currentTime]);
+
+  const handleSeekNextKeyframe = useCallback(() => {
+    if (keyframes.length === 0) return;
+    const next = keyframes.find((kf) => kf > currentTime + 0.05);
+    const target = next !== undefined ? next : keyframes[keyframes.length - 1];
+    setCurrentTime(target);
+    setStatusMessage(`SEEKED NEXT I-FRAME: ${target.toFixed(3)}s`);
+  }, [keyframes, currentTime]);
+
+  // Slice active segment at playhead (Shortcut: X)
+  const handleSliceAtPlayhead = useCallback(() => {
+    if (activeSegments.length === 0) return;
+    const nextSegments: [number, number][] = [];
+    let sliced = false;
+
+    for (const [s, e] of activeSegments) {
+      if (!sliced && currentTime > s + 0.15 && currentTime < e - 0.15) {
+        nextSegments.push([s, currentTime]);
+        nextSegments.push([currentTime, e]);
+        sliced = true;
+      } else {
+        nextSegments.push([s, e]);
+      }
+    }
+
+    if (sliced) {
+      setActiveSegments(nextSegments);
+      setStatusMessage(`SLICED CLIP AT PLAYHEAD (${currentTime.toFixed(2)}s) -> ${nextSegments.length} CLIPS`);
+    } else {
+      setStatusMessage("PLAYHEAD MUST BE INSIDE AN ACTIVE CLIP TO SLICE (X)");
+    }
+  }, [activeSegments, currentTime]);
+
+  // Cycle playback speed 1.0x -> 1.5x -> 2.0x -> 4.0x
+  const handleCyclePlaybackRate = useCallback(() => {
+    setPlaybackRate((prev) => {
+      const next = prev === 1.0 ? 1.5 : prev === 1.5 ? 2.0 : prev === 2.0 ? 4.0 : 1.0;
+      setStatusMessage(`PLAYBACK SPEED: ${next.toFixed(1)}x`);
+      return next;
+    });
+  }, []);
+
+  // Toggle live skip-silence audition mode
+  const handleToggleSkipSilencePreview = useCallback(() => {
+    setSkipSilencePreview((prev) => {
+      const next = !prev;
+      setStatusMessage(
+        next
+          ? "LIVE SKIP-SILENCE AUDITION: ON (Playback automatically jumps across silent regions)"
+          : "LIVE SKIP-SILENCE AUDITION: OFF"
+      );
+      return next;
+    });
+  }, []);
+
+  // Re-scan silence on threshold slider adjustment & update active segments
   const handleNoiseDbChange = async (newDb: number) => {
     setNoiseDb(newDb);
     if (!filePath) return;
@@ -233,6 +339,8 @@ export const App: React.FC = () => {
           trackIndex: selectedTrackIndex,
         });
         setSilenceIntervals(silences);
+        const updatedActive = computeActiveSegmentsWithPadding(silences, duration, 0.06);
+        setActiveSegments(updatedActive);
       }
     } catch (e) {
       console.error("Rescan failed", e);
@@ -243,7 +351,7 @@ export const App: React.FC = () => {
   const handleAutoCalibrateNoiseFloor = useCallback(async () => {
     if (!filePath) return;
     setIsCalibrating(true);
-    setStatusMessage("PROBING AUDIO VOLUME PROFILE (volumedetect)...");
+    setStatusMessage("PROBING AUDIO VOLUME PROFILE (85Hz-7800Hz Bandpass + volumedetect)...");
 
     try {
       if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
@@ -262,9 +370,11 @@ export const App: React.FC = () => {
           trackIndex: selectedTrackIndex,
         });
         setSilenceIntervals(silences);
+        const updatedActive = computeActiveSegmentsWithPadding(silences, duration, 0.06);
+        setActiveSegments(updatedActive);
 
         setStatusMessage(
-          `AUTO-CALIBRATED: MEAN ${profile.mean_volume_db}dB · MAX ${profile.max_volume_db}dB · REC ${profile.recommended_silence_db}dB`
+          `AUTO-CALIBRATED: MEAN ${profile.mean_volume_db}dB · MAX ${profile.max_volume_db}dB · REC ${profile.recommended_silence_db}dB (${updatedActive.length} CLIPS)`
         );
       }
     } catch (e) {
@@ -273,7 +383,7 @@ export const App: React.FC = () => {
     } finally {
       setIsCalibrating(false);
     }
-  }, [filePath, selectedTrackIndex]);
+  }, [filePath, selectedTrackIndex, duration]);
 
   // Toggle Cut Engine Mode (stream_copy -> smart_copy -> exact_frame)
   const handleToggleCutMode = useCallback(() => {
@@ -435,7 +545,7 @@ export const App: React.FC = () => {
     }
   }, [filePath, activeSegments, customOutputDir, cutMode]);
 
-  // Keyboard shortcuts with in/out boundary sanity
+  // Keyboard shortcuts
   useShortcuts({
     togglePlay: () => setIsPlaying((prev) => !prev),
     markIn: () => {
@@ -454,6 +564,14 @@ export const App: React.FC = () => {
     onNextHighlight: handleNextHighlight,
     stepFrameForward: () => setCurrentTime((t) => Math.min(duration, t + 0.04)),
     stepFrameBackward: () => setCurrentTime((t) => Math.max(0, t - 0.04)),
+    seekPrevKeyframe: handleSeekPrevKeyframe,
+    seekNextKeyframe: handleSeekNextKeyframe,
+    sliceAtPlayhead: handleSliceAtPlayhead,
+    toggleSkipSilencePreview: handleToggleSkipSilencePreview,
+    cyclePlaybackSpeed: handleCyclePlaybackRate,
+    rewindShuttle: () => setCurrentTime((t) => Math.max(0, t - 2.0)),
+    zoomIn: () => setZoomLevel((z) => Math.min(8, z * 2)),
+    zoomOut: () => setZoomLevel((z) => Math.max(1, z / 2)),
   });
 
   const fileNameOnly = filePath ? filePath.split(/[/\\]/).pop() : null;
@@ -482,7 +600,7 @@ export const App: React.FC = () => {
         <div className="flex items-center gap-2">
           <span className="font-bold tracking-widest text-zinc-100 text-[11px]">SNIPFLOW</span>
           <span className="text-zinc-600">/</span>
-          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">v0.3.2</span>
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">v0.3.3</span>
           {fileNameOnly && (
             <>
               <span className="text-zinc-700">|</span>
@@ -529,8 +647,14 @@ export const App: React.FC = () => {
                   isPlaying={isPlaying}
                   currentTime={currentTime}
                   duration={duration}
+                  playbackRate={playbackRate}
+                  skipSilencePreview={skipSilencePreview}
+                  silenceIntervals={silenceIntervals}
                   onTimeUpdate={setCurrentTime}
                   onTogglePlay={() => setIsPlaying(!isPlaying)}
+                  onEnded={() => setIsPlaying(false)}
+                  onCyclePlaybackRate={handleCyclePlaybackRate}
+                  onToggleSkipSilencePreview={handleToggleSkipSilencePreview}
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center bg-black rounded border border-zinc-850 font-mono text-xs text-zinc-600">
@@ -559,7 +683,7 @@ export const App: React.FC = () => {
 
             {/* Active Segments Ribbon */}
             {activeSegments.length > 0 && (
-              <div className="w-full shrink-0 flex items-center gap-1.5 overflow-x-auto py-1 px-1 bg-zinc-950 border border-zinc-855/80 rounded font-mono text-[10px] custom-scrollbar">
+              <div className="w-full shrink-0 flex items-center gap-1.5 overflow-x-auto py-1 px-1 bg-zinc-950 border border-zinc-850/80 rounded font-mono text-[10px] custom-scrollbar">
                 <div className="flex items-center gap-1 text-zinc-500 shrink-0 px-1.5">
                   <Scissors className="w-3 h-3 text-zinc-500" />
                   <span>CLIPS ({activeSegments.length}):</span>
@@ -657,9 +781,10 @@ export const App: React.FC = () => {
 
         <div className="flex items-center gap-2.5 text-zinc-500 shrink-0">
           <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">SPACE</kbd> PLAY</span>
-          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">←/→</kbd> STEP</span>
-          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">I</kbd> IN</span>
-          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">O</kbd> OUT</span>
+          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">J/K/L</kbd> SHUTTLE</span>
+          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">S</kbd> LIVE SKIP</span>
+          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">X</kbd> SLICE</span>
+          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">I/O</kbd> IN/OUT</span>
           <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">ENTER</kbd> EXPORT</span>
         </div>
       </footer>
