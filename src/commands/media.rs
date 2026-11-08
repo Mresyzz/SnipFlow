@@ -16,6 +16,42 @@ pub struct EnvironmentStatus {
     pub ffmpeg_path: Option<String>,
     pub ffprobe_path: Option<String>,
     pub internal_bin_dir: String,
+    pub install_hint: Option<String>,
+}
+
+fn detect_ffmpeg_install_hint() -> String {
+    #[cfg(target_os = "windows")]
+    {
+        "winget install Gyan.FFmpeg".to_string()
+    }
+    #[cfg(target_os = "macos")]
+    {
+        "brew install ffmpeg".to_string()
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(content) = std::fs::read_to_string("/etc/os-release") {
+            for line in content.lines() {
+                if let Some(val) = line.strip_prefix("ID=") {
+                    let id = val.trim_matches('"').trim_matches('\'').to_ascii_lowercase();
+                    match id.as_str() {
+                        "alpine" => return "apk add ffmpeg".to_string(),
+                        "debian" | "ubuntu" | "linuxmint" | "pop" => {
+                            return "sudo apt-get install -y ffmpeg".to_string()
+                        }
+                        "arch" | "manjaro" => return "sudo pacman -S ffmpeg".to_string(),
+                        "fedora" | "rhel" | "centos" => return "sudo dnf install -y ffmpeg".to_string(),
+                        _ => {}
+                    }
+                }
+            }
+        }
+        "sudo apt-get install -y ffmpeg".to_string()
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+    {
+        "Install ffmpeg via system package manager".to_string()
+    }
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -64,12 +100,20 @@ pub fn check_environment_cmd() -> EnvironmentStatus {
     let ffprobe = find_binary("ffprobe").ok();
     let internal_bin = get_internal_bin_dir();
 
+    let missing = ffmpeg.is_none() || ffprobe.is_none();
+    let install_hint = if missing {
+        Some(detect_ffmpeg_install_hint())
+    } else {
+        None
+    };
+
     EnvironmentStatus {
         ffmpeg_available: ffmpeg.is_some(),
         ffprobe_available: ffprobe.is_some(),
         ffmpeg_path: ffmpeg.map(|p| p.to_string_lossy().to_string()),
         ffprobe_path: ffprobe.map(|p| p.to_string_lossy().to_string()),
         internal_bin_dir: internal_bin.to_string_lossy().to_string(),
+        install_hint,
     }
 }
 

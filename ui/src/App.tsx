@@ -918,17 +918,33 @@ export const App: React.FC = () => {
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-white" />
             <span>
-              FFmpeg binaries not found. Expected in:{" "}
-              <strong>{envStatus.internal_bin_dir}</strong>
+              FFmpeg binaries not found.
+              {envStatus.install_hint && (
+                <span className="ml-2 text-zinc-300">
+                  Quick install:{" "}
+                  <code
+                    onClick={() => {
+                      navigator.clipboard.writeText(envStatus.install_hint!);
+                      setStatusMessage(`COPIED INSTALL COMMAND: ${envStatus.install_hint}`);
+                    }}
+                    title="Click to copy install command"
+                    className="px-1.5 py-0.5 rounded bg-black/60 border border-white/20 text-white cursor-pointer hover:border-white/50"
+                  >
+                    {envStatus.install_hint}
+                  </code>
+                </span>
+              )}
             </span>
           </div>
-          <button
-            onClick={() => alert(`Target binary directory: ${envStatus.internal_bin_dir}`)}
-            className="flex items-center gap-1 px-2 py-0.5 bg-white text-black rounded text-[10px] font-medium cursor-pointer"
-          >
-            <FolderOpen className="w-3 h-3" />
-            <span>Directory</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => alert(`Target binary directory: ${envStatus.internal_bin_dir}`)}
+              className="flex items-center gap-1 px-2 py-0.5 bg-white text-black rounded text-[10px] font-medium cursor-pointer"
+            >
+              <FolderOpen className="w-3 h-3" />
+              <span>Directory</span>
+            </button>
+          </div>
         </div>
       )}
 

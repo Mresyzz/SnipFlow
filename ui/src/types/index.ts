@@ -7,6 +7,7 @@ export interface EnvironmentStatus {
   ffmpeg_path: string | null;
   ffprobe_path: string | null;
   internal_bin_dir: string;
+  install_hint?: string | null;
 }
 
 export interface AudioStreamInfo {

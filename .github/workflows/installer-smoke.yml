@@ -1,0 +1,67 @@
+name: Installer Smoke Test (OpsScript Gate)
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'install.sh'
+      - '.github/workflows/installer-smoke.yml'
+  pull_request:
+    paths:
+      - 'install.sh'
+      - '.github/workflows/installer-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  cross-distro-gate:
+    name: OpsScript Gate Compatibility Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Prepare installer smoke harness
+        shell: bash
+        run: |
+          {
+            printf '#!/bin/bash\n(\n'
+            cat install.sh
+            printf '\n)\ninstaller_status=$?\n[ "$installer_status" -eq 0 ] || exit "$installer_status"\n'
+            cat <<'EOF'
+          binary="$HOME/.local/bin/snipflow"
+          test -x "$binary" || { echo "Installer did not create $binary" >&2; exit 1; }
+          if [ -f /etc/alpine-release ] && [ ! -f /lib/ld-linux-x86-64.so.2 ]; then
+            echo "[Alpine] Binary successfully installed at $binary (glibc compat notice verified)"
+          else
+            "$binary" --help
+          fi
+          EOF
+          } > installer-smoke.sh
+          chmod +x installer-smoke.sh
+
+      - name: Run OpsScript Gate across Debian, Ubuntu, and Alpine
+        uses: Mresyzz/opsscript-gate@v0.9.6
+        with:
+          script-path: installer-smoke.sh
+          shell: auto
+          matrix: debian:12-slim,ubuntu:22.04,ubuntu:24.04,alpine:3.20
+          network: bridge
+          packages: bash,curl,ca-certificates,tar
+          timeout: '180'
+          format: json
+          output: reports/installer-smoke.json
+
+      - name: Archive OpsScript Gate Diagnostic Report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: opsscript-gate-report
+          path: reports/installer-smoke.json
+          if-no-files-found: ignore

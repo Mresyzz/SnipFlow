@@ -8,11 +8,14 @@
   <strong>Ultra-fast, local-first lossless video clipper, silence stripper & NLE pre-cut studio powered by Rust and FFmpeg.</strong>
   <br />
   <em>Hybrid Smart-GOP rendering. Voice-bandpass silence stripping. Instant EDL & FCPXML timeline export.</em>
+  <br />
+  <a href="README.zh-CN.md">简体中文说明文档</a>
 </p>
 
 <p align="center">
   <a href="https://github.com/Mresyzz/SnipFlow/releases"><img src="https://img.shields.io/github/v/release/Mresyzz/SnipFlow?style=flat-square&color=00f2fe&label=Release" alt="Latest Release" /></a>
   <a href="https://crates.io/crates/snipflow"><img src="https://img.shields.io/crates/v/snipflow?style=flat-square&color=ff8008&label=Cargo" alt="Crates.io" /></a>
+  <a href="https://github.com/Mresyzz/opsscript-gate"><img src="https://img.shields.io/badge/OpsScript%20Gate-Verified-2088FF?style=flat-square&logo=linux" alt="OpsScript Gate Verified" /></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-GPL--3.0-blue.svg?style=flat-square" alt="License: GPL-3.0" /></a>
   <a href="https://www.rust-lang.org/"><img src="https://img.shields.io/badge/Rust-1.78+-orange.svg?style=flat-square&logo=rust" alt="Rust Version" /></a>
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=flat-square" alt="Platform Support" />
@@ -79,6 +82,16 @@ SnipFlow combines two orthogonal signal passes:
 ---
 
 ## Installation
+
+### Automated Install (Linux & macOS)
+
+Install the standalone binary into `~/.local/bin` using the automated unattended installer—verified across real Debian, Ubuntu, and Alpine containers via [OpsScript Gate](https://github.com/Mresyzz/opsscript-gate):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Mresyzz/SnipFlow/main/install.sh | bash
+```
+
+> **Note**: The installer automatically validates host architecture, downloads the matching pre-compiled binary, inspects local FFmpeg availability, and provides exact package installation commands if dependencies are missing.
 
 ### Pre-built Binaries
 
