@@ -12,8 +12,9 @@ import {
   Zap,
   FolderOpen,
   Activity,
+  FileCode,
 } from "lucide-react";
-import { AudioStreamInfo, CutMode } from "../types";
+import { AudioStreamInfo, ContainerFormat, CutMode } from "../types";
 
 interface ToolbarProps {
   inPoint: number | null;
@@ -33,6 +34,8 @@ interface ToolbarProps {
   activeSegmentCount: number;
   customOutputDir: string | null;
   cutMode: CutMode;
+  containerFormat: ContainerFormat;
+  onChangeContainerFormat: (fmt: ContainerFormat) => void;
   onToggleCutMode: () => void;
   onAutoCalibrateNoiseFloor: () => void;
   onSelectTrack: (trackIndex: number) => void;
@@ -46,6 +49,7 @@ interface ToolbarProps {
   onStripSilence: () => void;
   onNextHighlight: () => void;
   onSelectOutputDir: () => void;
+  onExportNleTimeline: () => void;
   onExport: () => void;
   onBatchExport: () => void;
   onSeamlessMerge: () => void;
@@ -69,6 +73,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   activeSegmentCount,
   customOutputDir,
   cutMode,
+  containerFormat,
+  onChangeContainerFormat,
   onToggleCutMode,
   onAutoCalibrateNoiseFloor,
   onSelectTrack,
@@ -82,6 +88,7 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   onStripSilence,
   onNextHighlight,
   onSelectOutputDir,
+  onExportNleTimeline,
   onExport,
   onBatchExport,
   onSeamlessMerge,
@@ -309,11 +316,35 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <FolderOpen className="w-3.5 h-3.5" />
         </button>
 
+        {/* Container Format Selector (Lossless Remux Override) */}
+        <select
+          value={containerFormat}
+          onChange={(e) => onChangeContainerFormat(e.target.value as ContainerFormat)}
+          className="bg-zinc-850 hover:bg-zinc-800 text-zinc-300 border border-zinc-750 rounded px-1.5 py-1 text-[10px] font-mono focus:outline-none cursor-pointer"
+          title="Output Container Format (AUTO preserves original extension, or choose MP4/MKV/MOV for zero-reencode container remuxing)"
+        >
+          <option value="auto" className="bg-zinc-900">EXT: AUTO</option>
+          <option value="mp4" className="bg-zinc-900">EXT: .MP4</option>
+          <option value="mkv" className="bg-zinc-900">EXT: .MKV</option>
+          <option value="mov" className="bg-zinc-900">EXT: .MOV</option>
+        </select>
+
         {lastExportElapsedMs !== null && (
           <span className="text-[10px] text-emerald-400 mr-1 font-mono">
             {lastExportElapsedMs.toFixed(1)}ms
           </span>
         )}
+
+        {/* NLE Project Export (CMX 3600 EDL + FCPXML v1.9) */}
+        <button
+          onClick={onExportNleTimeline}
+          disabled={isExporting}
+          className="flex items-center gap-1 px-2 py-1 rounded bg-zinc-850 hover:bg-zinc-800 text-amber-300 border border-zinc-750 text-[11px] cursor-pointer disabled:opacity-40 transition"
+          title="Export Non-Destructive NLE Timeline (.edl + .fcpxml) for DaVinci Resolve, Premiere Pro & Final Cut Pro"
+        >
+          <FileCode className="w-3 h-3" />
+          <span>EDL/XML</span>
+        </button>
 
         {/* Seamless Merge Button (Zero-reencode single continuous file) */}
         {activeSegmentCount > 1 && (

@@ -1,7 +1,9 @@
 use std::path::PathBuf;
 use serde::Serialize;
 use tauri::command;
-use snipflow::{lossless_cut_with_mode, seamless_merge_with_mode, CutMode};
+use snipflow::{
+    export_cmx3600_edl, export_fcpxml, lossless_cut_with_mode, seamless_merge_with_mode, CutMode,
+};
 
 #[derive(Serialize, Clone, Debug)]
 pub struct CutResult {
@@ -19,6 +21,13 @@ pub struct BatchExportResult {
     pub total_elapsed_ms: f64,
     pub output_dir: String,
     pub clips: Vec<String>,
+}
+
+#[derive(Serialize, Clone, Debug)]
+pub struct NleExportResult {
+    pub edl_path: String,
+    pub fcpxml_path: String,
+    pub events_count: usize,
 }
 
 #[command]
@@ -57,6 +66,7 @@ pub async fn batch_export_segments_cmd(
     segments: Vec<(f64, f64)>,
     output_dir_override: Option<String>,
     cut_mode: Option<CutMode>,
+    container_format: Option<String>,
 ) -> Result<BatchExportResult, String> {
     tokio::task::spawn_blocking(move || {
         let src = PathBuf::from(&source_path);
@@ -75,8 +85,12 @@ pub async fn batch_export_segments_cmd(
 
         std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
 
-        let extension = src.extension().unwrap_or_default().to_string_lossy();
-        let ext_str = if extension.is_empty() { "mp4" } else { &extension };
+        let src_ext = src.extension().unwrap_or_default().to_string_lossy().to_string();
+        let ext_str = match container_format.as_deref() {
+            Some("mp4" | "mkv" | "mov") => container_format.unwrap(),
+            _ if !src_ext.is_empty() => src_ext,
+            _ => "mp4".to_string(),
+        };
 
         let t0 = std::time::Instant::now();
         let mut created_clips = Vec::new();
@@ -150,4 +164,41 @@ pub async fn export_seamless_merge_cmd(
     })
     .await
     .map_err(|e| format!("Seamless merge failed: {e}"))?
+}
+
+#[command]
+pub async fn export_nle_timeline_cmd(
+    source_path: String,
+    segments: Vec<(f64, f64)>,
+    total_duration: f64,
+    output_dir_override: Option<String>,
+) -> Result<NleExportResult, String> {
+    tokio::task::spawn_blocking(move || {
+        let src = PathBuf::from(&source_path);
+        if !src.exists() {
+            return Err(format!("Source media not found: {source_path}"));
+        }
+
+        let stem = src.file_stem().unwrap_or_default().to_string_lossy();
+        let out_dir = match output_dir_override {
+            Some(d) => PathBuf::from(d),
+            None => src.parent().unwrap_or(PathBuf::from(".").as_path()).to_path_buf(),
+        };
+
+        std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
+
+        let edl_path = out_dir.join(format!("{stem}_timeline.edl"));
+        let fcpxml_path = out_dir.join(format!("{stem}_timeline.fcpxml"));
+
+        export_cmx3600_edl(&src, &segments, 30, &edl_path).map_err(|e| e.to_string())?;
+        export_fcpxml(&src, &segments, total_duration, &fcpxml_path).map_err(|e| e.to_string())?;
+
+        Ok(NleExportResult {
+            edl_path: edl_path.to_string_lossy().to_string(),
+            fcpxml_path: fcpxml_path.to_string_lossy().to_string(),
+            events_count: segments.len(),
+        })
+    })
+    .await
+    .map_err(|e| format!("NLE timeline export failed: {e}"))?
 }

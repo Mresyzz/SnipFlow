@@ -9,9 +9,11 @@ import {
   CutResult,
   BatchExportResult,
   SeamlessMergeResult,
+  NleExportResult,
   EnvironmentStatus,
   AudioStreamInfo,
   AudioVolumeProfile,
+  ContainerFormat,
   CutMode,
 } from "./types";
 import { AlertTriangle, FolderOpen, Play, X, Scissors } from "lucide-react";
@@ -54,6 +56,30 @@ function computeActiveSegmentsWithPadding(
   return active;
 }
 
+/**
+ * Safely constructs an export file path across Windows (`\`) and Unix (`/`)
+ * while respecting optional custom output directories and container format overrides.
+ */
+function buildExportFilePath(
+  sourcePath: string,
+  customDir: string | null,
+  suffix: string,
+  containerFormat: ContainerFormat
+): string {
+  const sep = sourcePath.includes("\\") ? "\\" : "/";
+  const parts = sourcePath.split(/[/\\]/);
+  const fileName = parts.pop() || "video.mp4";
+  const dir = customDir ? customDir.replace(/[/\\]+$/, "") : parts.join(sep);
+
+  const dotIdx = fileName.lastIndexOf(".");
+  const stem = dotIdx > 0 ? fileName.slice(0, dotIdx) : fileName;
+  const origExt = dotIdx > 0 ? fileName.slice(dotIdx + 1) : "mp4";
+  const targetExt = containerFormat === "auto" ? origExt : containerFormat;
+
+  const outFileName = `${stem}${suffix}.${targetExt}`;
+  return dir ? `${dir}${sep}${outFileName}` : outFileName;
+}
+
 export const App: React.FC = () => {
   const [filePath, setFilePath] = useState<string | null>(null);
   const [videoUrl, setVideoUrl] = useState<string | null>(null);
@@ -82,8 +108,9 @@ export const App: React.FC = () => {
   const [zoomLevel, setZoomLevel] = useState<number>(1);
   const [customOutputDir, setCustomOutputDir] = useState<string | null>(null);
 
-  // Tri-State Cut Engine and Auto-Calibration states
+  // Tri-State Cut Engine, Container Format, and Auto-Calibration states
   const [cutMode, setCutMode] = useState<CutMode>("smart_copy");
+  const [containerFormat, setContainerFormat] = useState<ContainerFormat>("auto");
   const [isCalibrating, setIsCalibrating] = useState<boolean>(false);
 
   const [isExporting, setIsExporting] = useState<boolean>(false);
@@ -452,9 +479,12 @@ export const App: React.FC = () => {
         : "EXECUTING EXACT FAST RENDER (libx264 ultrafast)..."
     );
 
-    const defaultOutput = customOutputDir
-      ? `${customOutputDir}/${filePath.split(/[/\\]/).pop()?.replace(/(\.[^.]+)$/, "_cut$1")}`
-      : filePath.replace(/(\.[^.]+)$/, "_cut$1");
+    const defaultOutput = buildExportFilePath(
+      filePath,
+      customOutputDir,
+      "_cut",
+      containerFormat
+    );
 
     try {
       if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
@@ -479,7 +509,7 @@ export const App: React.FC = () => {
     } finally {
       setIsExporting(false);
     }
-  }, [filePath, inPoint, outPoint, duration, customOutputDir, cutMode]);
+  }, [filePath, inPoint, outPoint, duration, customOutputDir, cutMode, containerFormat]);
 
   // Batch multi-clip export
   const handleBatchExport = useCallback(async () => {
@@ -496,6 +526,7 @@ export const App: React.FC = () => {
           segments: activeSegments,
           outputDirOverride: customOutputDir,
           cutMode,
+          containerFormat: containerFormat === "auto" ? null : containerFormat,
         });
 
         setLastExportElapsedMs(res.total_elapsed_ms);
@@ -510,7 +541,7 @@ export const App: React.FC = () => {
     } finally {
       setIsExporting(false);
     }
-  }, [filePath, activeSegments, customOutputDir, cutMode]);
+  }, [filePath, activeSegments, customOutputDir, cutMode, containerFormat]);
 
   // Seamless merge export
   const handleSeamlessMerge = useCallback(async () => {
@@ -519,15 +550,20 @@ export const App: React.FC = () => {
     setIsExporting(true);
     setStatusMessage(`SEAMLESS CONCATENATING ${activeSegments.length} ACTIVE SEGMENTS [${cutMode.toUpperCase()}]...`);
 
+    const outputPathOverride = buildExportFilePath(
+      filePath,
+      customOutputDir,
+      "_seamless_clean",
+      containerFormat
+    );
+
     try {
       if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
         const { invoke } = await import("@tauri-apps/api/core");
         const res = await invoke<SeamlessMergeResult>("export_seamless_merge_cmd", {
           sourcePath: filePath,
           segments: activeSegments,
-          outputPathOverride: customOutputDir
-            ? `${customOutputDir}/${filePath.split(/[/\\]/).pop()?.replace(/(\.[^.]+)$/, "_seamless_clean$1")}`
-            : null,
+          outputPathOverride,
           cutMode,
         });
 
@@ -543,7 +579,41 @@ export const App: React.FC = () => {
     } finally {
       setIsExporting(false);
     }
-  }, [filePath, activeSegments, customOutputDir, cutMode]);
+  }, [filePath, activeSegments, customOutputDir, cutMode, containerFormat]);
+
+  // Export NLE Timeline (CMX 3600 EDL + FCPXML v1.9)
+  const handleExportNleTimeline = useCallback(async () => {
+    if (!filePath) return;
+    const segmentsToExport: [number, number][] =
+      activeSegments.length > 0
+        ? activeSegments
+        : [[inPoint ?? 0, outPoint ?? duration]];
+
+    setIsExporting(true);
+    setStatusMessage("EXPORTING NLE TIMELINE (CMX 3600 .EDL + FCPXML v1.9 .FCPXML)...");
+
+    try {
+      if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+        const { invoke } = await import("@tauri-apps/api/core");
+        const res = await invoke<NleExportResult>("export_nle_timeline_cmd", {
+          sourcePath: filePath,
+          segments: segmentsToExport,
+          totalDuration: duration,
+          outputDirOverride: customOutputDir,
+        });
+
+        setStatusMessage(
+          `NLE TIMELINE EXPORTED (${res.events_count} EVENTS): ${res.edl_path} & ${res.fcpxml_path}`
+        );
+      } else {
+        setStatusMessage("DESKTOP TAURI RUNTIME REQUIRED FOR NLE PROJECT EXPORT");
+      }
+    } catch (err) {
+      setStatusMessage(`NLE EXPORT FAILED: ${err}`);
+    } finally {
+      setIsExporting(false);
+    }
+  }, [filePath, activeSegments, inPoint, outPoint, duration, customOutputDir]);
 
   // Keyboard shortcuts
   useShortcuts({
@@ -600,7 +670,7 @@ export const App: React.FC = () => {
         <div className="flex items-center gap-2">
           <span className="font-bold tracking-widest text-zinc-100 text-[11px]">SNIPFLOW</span>
           <span className="text-zinc-600">/</span>
-          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">v0.3.3</span>
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">v0.4.0</span>
           {fileNameOnly && (
             <>
               <span className="text-zinc-700">|</span>
@@ -677,49 +747,73 @@ export const App: React.FC = () => {
                 isMagneticSnapEnabled={isMagneticSnapEnabled}
                 zoomLevel={zoomLevel}
                 onSeek={(t) => setCurrentTime(t)}
+                onChangeInPoint={(t) => setInPoint(t)}
+                onChangeOutPoint={(t) => setOutPoint(t)}
                 onDragStart={() => setIsPlaying(false)}
               />
             </div>
 
-            {/* Active Segments Ribbon */}
-            {activeSegments.length > 0 && (
-              <div className="w-full shrink-0 flex items-center gap-1.5 overflow-x-auto py-1 px-1 bg-zinc-950 border border-zinc-850/80 rounded font-mono text-[10px] custom-scrollbar">
-                <div className="flex items-center gap-1 text-zinc-500 shrink-0 px-1.5">
-                  <Scissors className="w-3 h-3 text-zinc-500" />
-                  <span>CLIPS ({activeSegments.length}):</span>
-                </div>
-                {activeSegments.map(([s, e], idx) => {
-                  const clipDur = Math.max(0, e - s);
-                  const isCurrent = inPoint !== null && Math.abs(inPoint - s) < 0.2;
-                  return (
-                    <div
-                      key={idx}
-                      className={`flex items-center gap-1 px-2 py-0.5 rounded border transition shrink-0 cursor-pointer ${
-                        isCurrent
-                          ? "bg-cyan-950/40 border-cyan-700 text-cyan-300"
-                          : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850"
-                      }`}
-                      onClick={() => handleSelectSegment(s, e)}
-                      title={`Jump to Clip #${idx + 1} (${s.toFixed(2)}s - ${e.toFixed(2)}s)`}
-                    >
-                      <Play className="w-2.5 h-2.5 opacity-60" />
-                      <span>#{idx + 1}</span>
-                      <span className="text-zinc-500">{clipDur.toFixed(1)}s</span>
-                      <button
-                        onClick={(ev) => {
-                          ev.stopPropagation();
-                          handleRemoveSegment(idx);
-                        }}
-                        className="hover:text-rose-400 ml-0.5 text-zinc-600 cursor-pointer"
-                        title="Exclude clip from export"
-                      >
-                        <X className="w-2.5 h-2.5" />
-                      </button>
+            {/* Active Segments Ribbon & Compression Analytics HUD */}
+            {activeSegments.length > 0 && (() => {
+              const totalKeptSec = activeSegments.reduce(
+                (acc, [s, e]) => acc + Math.max(0, e - s),
+                0
+              );
+              const savedSec = Math.max(0, duration - totalKeptSec);
+              const keptPct = duration > 0 ? Math.round((totalKeptSec / duration) * 100) : 100;
+
+              return (
+                <div className="w-full shrink-0 flex items-center justify-between gap-2 py-1 px-1.5 bg-zinc-950 border border-zinc-850/80 rounded font-mono text-[10px]">
+                  <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar">
+                    <div className="flex items-center gap-1 text-zinc-500 shrink-0 px-1">
+                      <Scissors className="w-3 h-3 text-zinc-500" />
+                      <span>CLIPS ({activeSegments.length}):</span>
                     </div>
-                  );
-                })}
-              </div>
-            )}
+                    {activeSegments.map(([s, e], idx) => {
+                      const clipDur = Math.max(0, e - s);
+                      const isCurrent = inPoint !== null && Math.abs(inPoint - s) < 0.2;
+                      return (
+                        <div
+                          key={idx}
+                          className={`flex items-center gap-1 px-2 py-0.5 rounded border transition shrink-0 cursor-pointer ${
+                            isCurrent
+                              ? "bg-cyan-950/40 border-cyan-700 text-cyan-300"
+                              : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850"
+                          }`}
+                          onClick={() => handleSelectSegment(s, e)}
+                          title={`Jump to Clip #${idx + 1} (${s.toFixed(2)}s - ${e.toFixed(2)}s)`}
+                        >
+                          <Play className="w-2.5 h-2.5 opacity-60" />
+                          <span>#{idx + 1}</span>
+                          <span className="text-zinc-500">{clipDur.toFixed(1)}s</span>
+                          <button
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              handleRemoveSegment(idx);
+                            }}
+                            className="hover:text-rose-400 ml-0.5 text-zinc-600 cursor-pointer"
+                            title="Exclude clip from export"
+                          >
+                            <X className="w-2.5 h-2.5" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Triage Compression Analytics HUD */}
+                  <div className="flex items-center gap-2 shrink-0 px-2 py-0.5 bg-zinc-900/90 border border-zinc-800 rounded text-[10px]">
+                    <span className="text-emerald-400 font-semibold">
+                      KEPT: {totalKeptSec.toFixed(1)}s ({keptPct}%)
+                    </span>
+                    <span className="text-zinc-600">·</span>
+                    <span className="text-rose-400">
+                      STRIPPED: -{savedSec.toFixed(1)}s
+                    </span>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Compact Transport Toolbar */}
             <div className="w-full shrink-0">
@@ -741,6 +835,15 @@ export const App: React.FC = () => {
                 activeSegmentCount={activeSegments.length}
                 customOutputDir={customOutputDir}
                 cutMode={cutMode}
+                containerFormat={containerFormat}
+                onChangeContainerFormat={(fmt) => {
+                  setContainerFormat(fmt);
+                  setStatusMessage(
+                    fmt === "auto"
+                      ? "CONTAINER FORMAT: AUTO (Preserve source container)"
+                      : `CONTAINER FORMAT: .${fmt.toUpperCase()} (Zero-reencode stream remux)`
+                  );
+                }}
                 onToggleCutMode={handleToggleCutMode}
                 onAutoCalibrateNoiseFloor={handleAutoCalibrateNoiseFloor}
                 onSelectTrack={handleSelectTrack}
@@ -764,6 +867,7 @@ export const App: React.FC = () => {
                 onStripSilence={handleStripSilence}
                 onNextHighlight={handleNextHighlight}
                 onSelectOutputDir={handleSelectOutputDir}
+                onExportNleTimeline={handleExportNleTimeline}
                 onExport={handleExport}
                 onBatchExport={handleBatchExport}
                 onSeamlessMerge={handleSeamlessMerge}

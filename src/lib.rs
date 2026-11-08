@@ -20,6 +20,10 @@ pub use core::highlight::{
 pub use core::keyframe::{
     check_keyframe_alignment, find_nearest_keyframe, get_keyframes, KeyframeAlignment,
 };
+pub use core::nle::{
+    export_cmx3600_edl, export_fcpxml, generate_cmx3600_edl_string, generate_fcpxml_string,
+    seconds_to_smpte,
+};
 pub use core::silence::{
     detect_silence, detect_silence_track, parse_silencedetect_logs, parse_volumedetect_output,
     probe_audio_volume, AudioVolumeProfile,

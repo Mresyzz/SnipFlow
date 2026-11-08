@@ -1,8 +1,11 @@
 use snipflow::{
-    check_keyframe_alignment, find_nearest_keyframe, find_next_gop_boundary, invert_silence,
+    check_keyframe_alignment, find_nearest_keyframe, find_next_gop_boundary,
+    generate_cmx3600_edl_string, generate_fcpxml_string, invert_silence,
     invert_silence_with_padding, merge_and_dedup_peaks, parse_ebur128_peaks,
-    parse_showinfo_scene_peaks, parse_silencedetect_logs, parse_volumedetect_output, CutMode,
+    parse_showinfo_scene_peaks, parse_silencedetect_logs, parse_volumedetect_output,
+    seconds_to_smpte, CutMode,
 };
+use std::path::Path;
 
 #[test]
 fn test_invert_silence_with_padding() {
@@ -151,4 +154,22 @@ fn test_cut_mode_serde() {
 
     let mode_exact: CutMode = serde_json::from_str("\"exact_frame\"").unwrap();
     assert_eq!(mode_exact, CutMode::ExactFrame);
+}
+
+#[test]
+fn test_nle_edl_and_fcpxml_generation() {
+    assert_eq!(seconds_to_smpte(0.0, 30.0), "00:00:00:00");
+    assert_eq!(seconds_to_smpte(65.5, 30.0), "00:01:05:15");
+
+    let segments = vec![(1.0, 3.5), (5.0, 8.0)];
+    let edl = generate_cmx3600_edl_string(Path::new("demo_lecture.mp4"), &segments, 30.0);
+    assert!(edl.contains("TITLE: demo_lecture"));
+    assert!(edl.contains("001  AX       AA/V  C"));
+    assert!(edl.contains("* FROM CLIP NAME: demo_lecture.mp4"));
+
+    let xml = generate_fcpxml_string(Path::new("demo_lecture.mp4"), &segments, 12.0, 30);
+    assert!(xml.contains("<fcpxml version=\"1.9\">"));
+    assert!(xml.contains("demo_lecture.mp4"));
+    assert!(xml.contains("<asset-clip name=\"Clip 1\""));
+    assert!(xml.contains("<asset-clip name=\"Clip 2\""));
 }

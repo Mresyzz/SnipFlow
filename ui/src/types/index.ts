@@ -1,4 +1,5 @@
 export type CutMode = 'stream_copy' | 'smart_copy' | 'exact_frame';
+export type ContainerFormat = 'auto' | 'mp4' | 'mkv' | 'mov';
 
 export interface EnvironmentStatus {
   ffmpeg_available: boolean;
@@ -74,4 +75,10 @@ export interface SeamlessMergeResult {
   output_path: string;
   total_elapsed_ms: number;
   merged_segments_count: number;
+}
+
+export interface NleExportResult {
+  edl_path: string;
+  fcpxml_path: string;
+  events_count: number;
 }

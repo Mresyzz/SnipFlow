@@ -6,8 +6,9 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 use snipflow::{
-    detect_silence, get_duration, get_keyframes, invert_silence, lossless_cut_with_mode,
-    probe_audio_volume, seamless_merge_with_mode, CutMode,
+    detect_silence, export_cmx3600_edl, export_fcpxml, get_duration, get_keyframes,
+    invert_silence_with_padding, lossless_cut_with_mode, probe_audio_volume,
+    seamless_merge_with_mode, CutMode,
 };
 
 fn is_supported_video_file(path: &Path) -> bool {
@@ -23,7 +24,7 @@ fn is_supported_video_file(path: &Path) -> bool {
 }
 
 fn print_cli_help() {
-    println!("SnipFlow v0.3.3 - Zero-Reencode Video Clipper & Silence Stripper");
+    println!("SnipFlow v0.4.0 - Zero-Reencode Video Clipper & Silence Stripper");
     println!();
     println!("USAGE:");
     println!("  snipflow                                      Launch desktop studio GUI");
@@ -35,6 +36,7 @@ fn print_cli_help() {
     println!("  --db <float>          Silence threshold in dB (default: auto-calibrated via volumedetect)");
     println!("  --min-silence <sec>   Minimum silence duration in seconds (default: 0.5)");
     println!("  --mode <mode>         Cut engine: copy | smart | exact (default: smart)");
+    println!("  --nle                 Also export CMX 3600 (.edl) & Final Cut (.fcpxml) timelines");
 }
 
 fn run_cli_mode(video_path: PathBuf, output_path: PathBuf) -> Result<(), Box<dyn std::error::Error>> {
@@ -68,7 +70,7 @@ fn run_cli_mode(video_path: PathBuf, output_path: PathBuf) -> Result<(), Box<dyn
         t1.elapsed().as_secs_f64() * 1000.0
     );
 
-    let active_segments = invert_silence(&silence_intervals, duration);
+    let active_segments = invert_silence_with_padding(&silence_intervals, duration, 0.06);
     let t2 = Instant::now();
 
     if active_segments.len() > 1 {
@@ -107,6 +109,7 @@ fn run_batch_mode(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
     let mut custom_db: Option<f64> = None;
     let mut min_silence: f64 = 0.5;
     let mut mode = CutMode::SmartCopy;
+    let mut export_nle = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -132,6 +135,10 @@ fn run_batch_mode(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
                     _ => CutMode::SmartCopy,
                 };
                 i += 2;
+            }
+            "--nle" => {
+                export_nle = true;
+                i += 1;
             }
             arg if !arg.starts_with("--") => {
                 let p = PathBuf::from(arg);
@@ -196,7 +203,7 @@ fn run_batch_mode(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         let active = if silences.is_empty() {
             vec![(0.0, duration)]
         } else {
-            invert_silence(&silences, duration)
+            invert_silence_with_padding(&silences, duration, 0.06)
         };
 
         let stem = video_path.file_stem().unwrap_or_default().to_string_lossy();
@@ -216,6 +223,13 @@ fn run_batch_mode(args: &[String]) -> Result<(), Box<dyn std::error::Error>> {
         if active.is_empty() {
             eprintln!("  [!] File is 100% silent, skipping export.");
             continue;
+        }
+
+        if export_nle {
+            let edl_file = target_dir.join(format!("{stem}_timeline.edl"));
+            let xml_file = target_dir.join(format!("{stem}_timeline.fcpxml"));
+            let _ = export_cmx3600_edl(video_path, &active, 30, &edl_file);
+            let _ = export_fcpxml(video_path, &active, duration, &xml_file);
         }
 
         let res = seamless_merge_with_mode(video_path, &active, &out_file, mode);
@@ -311,6 +325,7 @@ fn main() {
             commands::cut::lossless_cut_cmd,
             commands::cut::batch_export_segments_cmd,
             commands::cut::export_seamless_merge_cmd,
+            commands::cut::export_nle_timeline_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running SnipFlow desktop application");
