@@ -42,8 +42,8 @@ export const App: React.FC = () => {
   const [zoomLevel, setZoomLevel] = useState<number>(1);
   const [customOutputDir, setCustomOutputDir] = useState<string | null>(null);
 
-  // Dual-Engine and Auto-Calibration states
-  const [cutMode, setCutMode] = useState<CutMode>("stream_copy");
+  // Tri-State Cut Engine and Auto-Calibration states
+  const [cutMode, setCutMode] = useState<CutMode>("smart_copy");
   const [isCalibrating, setIsCalibrating] = useState<boolean>(false);
 
   const [isExporting, setIsExporting] = useState<boolean>(false);
@@ -275,14 +275,21 @@ export const App: React.FC = () => {
     }
   }, [filePath, selectedTrackIndex]);
 
-  // Toggle Cut Engine Mode
+  // Toggle Cut Engine Mode (stream_copy -> smart_copy -> exact_frame)
   const handleToggleCutMode = useCallback(() => {
     setCutMode((prev) => {
-      const next = prev === "stream_copy" ? "exact_frame" : "stream_copy";
+      const next: CutMode =
+        prev === "stream_copy"
+          ? "smart_copy"
+          : prev === "smart_copy"
+          ? "exact_frame"
+          : "stream_copy";
       setStatusMessage(
         next === "stream_copy"
           ? "MODE: STREAM COPY (Instant zero-reencoding, snapped to GOP I-frames)"
-          : "MODE: EXACT FRAME (Ultra-fast smart render, sub-frame boundary precision)"
+          : next === "smart_copy"
+          ? "MODE: SMART GOP (Micro-renders partial leading GOP + zero-reencode stream copy body)"
+          : "MODE: EXACT FRAME (Full segment ultra-fast re-encode)"
       );
       return next;
     });
@@ -330,6 +337,8 @@ export const App: React.FC = () => {
     setStatusMessage(
       cutMode === "stream_copy"
         ? "EXECUTING STREAM COPY (-c copy)..."
+        : cutMode === "smart_copy"
+        ? "EXECUTING HYBRID SMART-GOP CUT (LEADING GOP MICRO-RENDER + STREAM COPY)..."
         : "EXECUTING EXACT FAST RENDER (libx264 ultrafast)..."
     );
 
@@ -473,7 +482,7 @@ export const App: React.FC = () => {
         <div className="flex items-center gap-2">
           <span className="font-bold tracking-widest text-zinc-100 text-[11px]">SNIPFLOW</span>
           <span className="text-zinc-600">/</span>
-          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">v0.3.1</span>
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">v0.3.2</span>
           {fileNameOnly && (
             <>
               <span className="text-zinc-700">|</span>
@@ -485,8 +494,21 @@ export const App: React.FC = () => {
         <div className="flex items-center gap-3 text-[10px] text-zinc-500 font-mono">
           <span>ENGINE: RUST/FFMPEG</span>
           <span>·</span>
-          <span className={cutMode === "stream_copy" ? "text-cyan-400 font-semibold" : "text-purple-400 font-semibold"}>
-            MODE: {cutMode === "stream_copy" ? "STREAM COPY (PASSTHROUGH)" : "EXACT FRAME (SMART RENDER)"}
+          <span
+            className={
+              cutMode === "stream_copy"
+                ? "text-cyan-400 font-semibold"
+                : cutMode === "smart_copy"
+                ? "text-emerald-400 font-semibold"
+                : "text-purple-400 font-semibold"
+            }
+          >
+            MODE:{" "}
+            {cutMode === "stream_copy"
+              ? "STREAM COPY (PASSTHROUGH)"
+              : cutMode === "smart_copy"
+              ? "SMART GOP (HYBRID MICRO-RENDER)"
+              : "EXACT FRAME (FULL RENDER)"}
           </span>
         </div>
       </header>

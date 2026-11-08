@@ -1,4 +1,4 @@
-export type CutMode = 'stream_copy' | 'exact_frame';
+export type CutMode = 'stream_copy' | 'smart_copy' | 'exact_frame';
 
 export interface EnvironmentStatus {
   ffmpeg_available: boolean;

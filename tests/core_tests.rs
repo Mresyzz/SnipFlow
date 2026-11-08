@@ -1,6 +1,7 @@
 use snipflow::{
-    check_keyframe_alignment, find_nearest_keyframe, invert_silence,
-    parse_volumedetect_output, CutMode,
+    check_keyframe_alignment, find_nearest_keyframe, find_next_gop_boundary, invert_silence,
+    merge_and_dedup_peaks, parse_ebur128_peaks, parse_showinfo_scene_peaks,
+    parse_silencedetect_logs, parse_volumedetect_output, CutMode,
 };
 
 #[test]
@@ -30,7 +31,6 @@ fn test_invert_silence_interleaved() {
 
 #[test]
 fn test_invert_silence_overlapping_intervals() {
-    // Handling overlapping or back-to-back silence detector intervals
     let silence = vec![(2.0, 4.5), (4.0, 6.0)];
     let active = invert_silence(&silence, 10.0);
     assert_eq!(
@@ -52,8 +52,19 @@ fn test_parse_volumedetect_output() {
     let profile = parse_volumedetect_output(sample_stderr).expect("Volumedetect parse failed");
     assert_eq!(profile.mean_volume_db, -28.4);
     assert_eq!(profile.max_volume_db, -0.2);
-    // mean_volume - 6.5 = -34.9 dB
     assert_eq!(profile.recommended_silence_db, -34.9);
+}
+
+#[test]
+fn test_parse_silencedetect_logs_with_trailing_open_silence() {
+    let sample_stderr = r#"
+[silencedetect @ 000001] silence_start: 1.500
+[silencedetect @ 000001] silence_end: 3.250 | silence_duration: 1.750
+[silencedetect @ 000001] silence_start: 8.400
+"#;
+
+    let intervals = parse_silencedetect_logs(sample_stderr, Some(10.0)).expect("Parse failed");
+    assert_eq!(intervals, vec![(1.5, 3.25), (8.4, 10.0)]);
 }
 
 #[test]
@@ -68,16 +79,25 @@ fn test_find_nearest_keyframe() {
 }
 
 #[test]
+fn test_find_next_gop_boundary() {
+    let keyframes = vec![0.0, 2.0, 4.0, 6.0, 8.0, 10.0];
+
+    // Cut from 2.5s to 9.5s -> first keyframe after 2.5s is 4.0s
+    assert_eq!(find_next_gop_boundary(&keyframes, 2.5, 9.5), Some(4.0));
+
+    // Cut entirely inside a single GOP (2.2s to 3.8s) -> no internal keyframe
+    assert_eq!(find_next_gop_boundary(&keyframes, 2.2, 3.8), None);
+}
+
+#[test]
 fn test_check_keyframe_alignment() {
     let keyframes = vec![0.0, 2.0, 4.0, 6.0];
 
-    // Aligned case: target is exactly on keyframe or within 18ms
     let aligned = check_keyframe_alignment(&keyframes, 2.008).expect("Should find keyframe");
     assert!(aligned.is_aligned);
     assert_eq!(aligned.nearest_pts, 2.0);
     assert_eq!(aligned.diff_ms, 8.0);
 
-    // Unaligned case: target is in between GOP keyframes
     let unaligned = check_keyframe_alignment(&keyframes, 3.100).expect("Should find keyframe");
     assert!(!unaligned.is_aligned);
     assert_eq!(unaligned.nearest_pts, 4.0);
@@ -85,12 +105,37 @@ fn test_check_keyframe_alignment() {
 }
 
 #[test]
-fn test_cut_mode_serde() {
-    let json_stream = "\"stream_copy\"";
-    let mode: CutMode = serde_json::from_str(json_stream).expect("Failed to deserialize stream_copy");
-    assert_eq!(mode, CutMode::StreamCopy);
+fn test_multimodal_highlights_parsing_and_dedup() {
+    let ebu_stderr = r#"
+[Parsed_ebur128_0 @ 001] t: 1.200  TARGET:-23 LUFS    M: -18.5 S: -20.1
+[Parsed_ebur128_0 @ 001] t: 4.500  TARGET:-23 LUFS    M: -11.2 S: -14.0
+[Parsed_ebur128_0 @ 001] t: 5.100  TARGET:-23 LUFS    M: -10.8 S: -13.2
+[Parsed_ebur128_0 @ 001] t: 12.800 TARGET:-23 LUFS    M: -9.5  S: -12.1
+"#;
+    let audio_peaks = parse_ebur128_peaks(ebu_stderr, -14.0).expect("EBU parse failed");
+    assert_eq!(audio_peaks, vec![4.5, 12.8]);
 
-    let json_exact = "\"exact_frame\"";
-    let mode_exact: CutMode = serde_json::from_str(json_exact).expect("Failed to deserialize exact_frame");
+    let scene_stderr = r#"
+[Parsed_showinfo_1 @ 002] n:   12 pts:  12400 pts_time:5.200   pos: 192000
+[Parsed_showinfo_1 @ 002] n:   45 pts:  48000 pts_time:20.000  pos: 892000
+"#;
+    let visual_peaks = parse_showinfo_scene_peaks(scene_stderr).expect("Scene parse failed");
+    assert_eq!(visual_peaks, vec![5.2, 20.0]);
+
+    let mut combined = [audio_peaks, visual_peaks].concat();
+    let merged = merge_and_dedup_peaks(&mut combined, 3.0);
+    // 5.2 is within 3.0s cooldown of 4.5, so it gets deduplicated; 12.8 and 20.0 remain
+    assert_eq!(merged, vec![4.5, 12.8, 20.0]);
+}
+
+#[test]
+fn test_cut_mode_serde() {
+    let mode_copy: CutMode = serde_json::from_str("\"stream_copy\"").unwrap();
+    assert_eq!(mode_copy, CutMode::StreamCopy);
+
+    let mode_smart: CutMode = serde_json::from_str("\"smart_copy\"").unwrap();
+    assert_eq!(mode_smart, CutMode::SmartCopy);
+
+    let mode_exact: CutMode = serde_json::from_str("\"exact_frame\"").unwrap();
     assert_eq!(mode_exact, CutMode::ExactFrame);
 }

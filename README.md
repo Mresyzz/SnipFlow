@@ -7,7 +7,7 @@
 <p align="center">
   <strong>Ultra-fast, local-first lossless video clipper & silence stripper powered by Rust and FFmpeg.</strong>
   <br />
-  <em>Zero re-encoding. Instant export. Minimalist dark aesthetic.</em>
+  <em>Hybrid Smart-GOP rendering. Voice-bandpass silence stripping. Industrial studio aesthetic.</em>
 </p>
 
 <p align="center">
@@ -25,14 +25,13 @@
   <img src="assets/demo.gif" alt="SnipFlow Demo" width="92%" />
 </p>
 
-
 ---
 
 ## Why SnipFlow?
 
 Conventional Non-Linear Editors (Premiere Pro, CapCut, DaVinci Resolve) treat every rough trim as a full-scale production. They force heavy project generation, proxy rendering, and destructive re-compression cycles that take minutes or hours while degrading bitrate.
 
-Conversely, traditional open-source stream tools (such as LosslessCut or HandBrake) remain bound to cumbersome Electron wrappers or multi-step manual segment picking, offering zero automated intelligence for stream archives, raw camera dumps, or gaming captures.
+Conversely, traditional open-source stream tools (such as LosslessCut or HandBrake) remain bound to cumbersome Electron wrappers or manual segment picking, offering zero automated intelligence for stream archives, raw camera dumps, or gaming captures.
 
 SnipFlow closes this architectural gap. It merges low-latency native system performance with intelligent, heuristic pre-cut automation—executing stream operations directly at the packet layer.
 
@@ -40,30 +39,36 @@ SnipFlow closes this architectural gap. It merges low-latency native system perf
 | :--- | :---: | :---: | :---: | :---: |
 | **Cold Start Time** | **< 0.2s (Native Rust)** | ~2.5s (Electron) | 15s – 45s (Heavy NLE) | Network dependent |
 | **Memory Footprint (Idle)** | **< 45 MB** | ~280 MB | ~1.5 GB+ | ~400 MB+ |
-| **Export Method** | **Stream Copy (`-c copy`)** | Stream Copy | Re-encode (Lossy) | Cloud Re-encode |
-| **Export Duration (1hr 4K)** | **~0.1s – 0.5s** | ~0.5s – 2s | 8 – 25 Minutes | Upload + Cloud Render |
-| **Automated Silence Stripping** | **Built-in (Real-time RMS)** | Manual Only | Manual / Complex Plugin | Paywalled / Cloud Queue |
-| **Peak Highlight Extraction** | **Built-in (Audio + Motion)**| None | None | None |
+| **Export Engine** | **Tri-Mode (`Stream Copy` / `Smart GOP` / `Exact`)** | Stream Copy | Re-encode (Lossy) | Cloud Re-encode |
+| **Export Duration (1hr 4K)** | **~0.1s – 0.6s** | ~0.5s – 2s | 8 – 25 Minutes | Upload + Cloud Render |
+| **Automated Silence Stripping** | **Voice-Bandpass + Auto-Calibrated dB** | Manual Only | Manual / Complex Plugin | Paywalled / Cloud Queue |
+| **Peak Highlight Extraction** | **Multimodal (Audio EBU R128 + Scene Flux)** | None | None | None |
+| **Headless Batch CLI** | **Built-in (`--batch`)** | Limited | Media Encoder Required | None |
 | **Privacy & Security** | **100% Local-First** | 100% Local | Local (Telemetry active) | Cloud upload required |
 
 ---
 
-## Features
+## Core Architecture & Engineering Highlights
 
-### Keyframe-Accurate Zero-Reencode Pipeline
-SnipFlow bypasses CPU/GPU decompression and quantization matrices entirely during export. By analyzing the underlying container packet metadata and aligning cut points with nearest Intra-frames (I-frames) or applying micro-smart-renders to GOP boundaries, the export engine delegates directly to demuxing-muxing stream pipelines. Bitrates, color spaces, audio bitstreams, and HDR metadata passes through completely untainted, turning multi-minute render queues into instantaneous disk writes.
+### 1. Tri-Mode Cut Engine with Hybrid Smart-GOP Rendering
+Pure stream copy (`-c copy`) is physically constrained to I-frame (keyframe) boundaries. SnipFlow provides three deterministic modes selectable in both GUI and CLI:
+- **`SMART GOP` (`CutMode::SmartCopy`)**: Inspects packet PTS alignment. If the In-point falls mid-GOP, SnipFlow micro-renders **only** the partial leading GOP span `[start -> first_keyframe]` (typically 0.2s–1.5s) and stitches it seamlessly to a zero-reencode stream copy `[first_keyframe -> end]` covering 99%+ of the asset.
+- **`STREAM COPY` (`CutMode::StreamCopy`)**: Pure zero-reencode demux/remux passthrough with real-time millisecond GOP drift indicators (`SNAP (+120ms)`) and magnetic keyframe snapping.
+- **`EXACT FRAME` (`CutMode::ExactFrame`)**: Ultra-fast full-segment render fallback (`-c:v libx264 -preset ultrafast -crf 18 -c:a copy`) for heavily damaged variable-framerate streams.
 
-### Adaptive RMS Audio Silence Stripper
-Long-form screen recordings, programming tutorials, podcasts, and stream VODs typically contain substantial dead air and non-vocal pauses. SnipFlow executes a multi-threaded root-mean-square (RMS) energy scan across the primary audio channel in fractions of a second. An interactive decibel-floor slider visualizes silent segments directly across the timeline waveform, allowing users to batch-purge breath gaps, hesitation intervals, and mic mutes with single-keystroke precision.
+### 2. Voice-Bandpass Silence Stripper & Adaptive Noise Floor Calibration
+Standard RMS energy detectors struggle with continuous low-frequency HVAC/fan hum or high-frequency mic hiss.
+- **Vocal Frequency Isolation**: SnipFlow chains an `85Hz – 7800Hz` bandpass filter (`highpass=f=85,lowpass=f=7800`) prior to `silencedetect` and `volumedetect` analysis, rejecting room rumble and coil whine while leaving the exported audio stream 100% untouched.
+- **One-Click Auto-Calibration**: The `AUTO CAL` probe analyzes whole-track `mean_volume` and `max_volume` distributions to compute the optimal silence threshold automatically.
 
-### Multimodal Transient Peak Detection
-Detecting clutch gaming moments, high-energy screams, or critical software triggers does not require scrub-fatigue. SnipFlow calculates temporal audio derivative spikes alongside keyframe luminance flux to mark sudden engagement shifts. High-density audio peaks and video transition thresholds are plotted on a dedicated metadata lane, allowing editors to jump directly between action highlights without skimming hundreds of gigabytes of raw footage.
+### 3. Multimodal Highlight Discovery (Audio EBU R128 + Visual Scene Flux)
+SnipFlow combines two orthogonal signal passes:
+- **Band-Filtered EBU R128 Momentary Loudness**: Isolates vocal/action transients (`120Hz – 6000Hz`) while suppressing mechanical keyboard click spikes.
+- **Keyframe Scene-Change Detection (`-skip_frame nokey`)**: Evaluates visual scene flux (`select='gt(scene,0.32)'`) directly across I-frames without decoding inter-frames, enabling accurate highlight extraction even on completely silent screen recordings.
 
-### Native Pure Rust Architecture
-Compiled directly to a lean, self-contained static binary, SnipFlow avoids Electron runtimes, virtual machines, and heavyweight dynamic dependencies. Timeline scrub operations leverage an asynchronous video frame cache decoupled from GUI render threads. Scrubbing through 10-bit HEVC 4K60 footage remains fluid and responsive with negligible heap allocation and sub-200ms cold launches.
-
-### Deterministic Local-First Sandbox
-Your media assets never leave local storage. SnipFlow operates completely offline, without telemetry daemons, tracking beacons, cloud background synchronization, or mandatory account logins. Hardware acceleration primitives interface strictly with local Vulkan, Metal, or DirectX12 APIs.
+### 4. Container Resilience & Multi-Track Stream Preservation
+- **Timestamp Sanitization**: Injects `-fflags +genpts+igndts+discardcorrupt` and `-avoid_negative_ts make_zero` to heal non-monotonic DTS/PTS in raw OBS dumps or surveillance captures.
+- **Safe Multi-Stream Mapping**: Maps `-map 0:v:0? -map 0:a? -map 0:s?` to preserve all multi-language / multi-channel audio tracks and subtitles while automatically stripping proprietary camera telemetry streams (`gpmd`, `tmcd`) that crash standard MP4 muxers.
 
 ---
 
@@ -71,55 +76,49 @@ Your media assets never leave local storage. SnipFlow operates completely offlin
 
 ### Pre-built Binaries
 
-Download pre-compiled, statically-linked standalone executables from the [Releases](https://github.com/Mresyzz/SnipFlow/releases) page:
+Download pre-compiled standalone archives from the [Releases](https://github.com/Mresyzz/SnipFlow/releases) page:
 
 - **Windows**: `snipflow-v*-x86_64-pc-windows-msvc.zip` (Zero-configuration portable bundle with static `ffmpeg.exe` and `ffprobe.exe` included)
-- **macOS**: `snipflow-macos-universal.dmg` (Apple Silicon & Intel)
-- **Linux**: `snipflow-linux-x86_64.tar.gz` or `SnipFlow.AppImage`
+- **macOS (Apple Silicon)**: `snipflow-v*-aarch64-apple-darwin.tar.gz`
+- **macOS (Intel)**: `snipflow-v*-x86_64-apple-darwin.tar.gz`
+- **Linux**: `snipflow-v*-x86_64-unknown-linux-gnu.tar.gz`
 
 ### Cargo (crates.io)
 
-Ensure you have Rust 1.78+ installed along with development libraries for your platform:
+SnipFlow interfaces with FFmpeg via process-isolated pipelines—**no C headers, `libavcodec-dev`, or `PKG_CONFIG_PATH` configuration required** to compile from source:
 
 ```bash
 cargo install snipflow
 ```
 
-### Build from Source
+---
+
+## Headless CLI & Batch Automation
+
+In addition to the desktop studio GUI, SnipFlow ships with a full headless CLI for server workflows and bulk recording triage:
 
 ```bash
-# Clone repository
-git clone https://github.com/Mresyzz/SnipFlow.git
-cd SnipFlow
+# Launch Desktop Studio GUI
+snipflow
 
-# Build release target with native optimizations
-cargo build --release
+# Single-file automated silence strip & smart-GOP seamless merge
+snipflow --cli raw_lecture.mp4 clean_lecture.mp4
 
-# Run executable
-./target/release/snipflow
+# Batch process an entire directory of recordings with auto-calibrated noise floor
+snipflow --batch ./raw_recordings --out-dir ./cleaned_vods --min-silence 0.5 --mode smart
 ```
-
-> **FFmpeg Dependency**: SnipFlow embeds runtime bindings to FFmpeg libraries (`libavcodec`, `libavformat`, `libavutil`, `libswresample`). Pre-built binaries ship with statically compiled FFmpeg components. For manual Cargo builds, standard shared libraries should be accessible via your system's `PATH` or `PKG_CONFIG_PATH`.
 
 ---
 
 ## Key Shortcuts
 
-SnipFlow is tailored for keyboard-centric, frictionless video triage.
-
 | Shortcut | Action | Description |
 | :--- | :--- | :--- |
 | `Space` | **Play / Pause** | Toggle playback at standard rate |
-| `J` / `K` / `L` | **Shuttle Transport** | Rewind, pause, and fast-forward at `1x / 2x / 4x / 8x` |
 | `←` / `→` | **Step Frame** | Move playhead backward / forward by 1 frame |
-| `Shift + ←` / `→` | **Keyframe Seek** | Jump directly to previous / next I-frame |
 | `I` / `O` | **Mark In / Out** | Set start and end boundaries for active segment |
-| `X` | **Slice at Playhead** | Split segment under cursor into two discrete clips |
-| `S` | **Strip Silence** | Trigger automated silence threshold scan |
-| `H` | **Next Peak** | Jump playhead to the next detected audio/motion highlight |
-| `Delete` / `Backspace` | **Remove Segment** | Drop selected segment from sequence timeline |
-| `Ctrl + E` / `Cmd + E` | **Lossless Export** | Execute zero-reencode export to disk |
-| `Ctrl + O` / `Cmd + O` | **Open Media** | Launch file dialogue or accept dropped video file |
+| `H` | **Next Peak** | Jump playhead to the next detected audio/visual highlight |
+| `Enter` | **Cut Export** | Execute export using active engine mode |
 
 ---
 
@@ -128,26 +127,14 @@ SnipFlow is tailored for keyboard-centric, frictionless video triage.
 - [x] High-performance keyframe-aligned demuxing and remuxing engine
 - [x] Fast RMS audio spectrum waveform generator
 - [x] Real-time silence thresholding and auto-cutting preview
-- [x] High-energy peak discovery heuristic
-- [ ] GOP micro-smart-rendering (exact sub-frame cuts at boundaries without recoding the entire file)
-- [ ] Multi-track audio stream isolation and separate channel mapping
-- [ ] Batch processing CLI interface for headless server workflows
-- [ ] Hardware-accelerated thumbnail strip generation via VA-API / NVDEC
-
----
-
-## Contributing
-
-Contributions adhering to strict engineering discipline and minimal dependency footprint are welcome. Please ensure that all pull requests maintain clean `cargo clippy` and `cargo fmt` standards.
-
-1. Fork the repository.
-2. Create your feature branch (`git checkout -b feat/gop-boundary-split`).
-3. Commit your changes (`git commit -m "feat(demux): add GOP boundary offset calculations"`).
-4. Push to the branch (`git push origin feat/gop-boundary-split`).
-5. Open a Pull Request.
+- [x] Multimodal audio EBU R128 + visual scene-flux highlight discovery
+- [x] GOP micro-smart-rendering (`CutMode::SmartCopy` hybrid leading-GOP encode + stream copy)
+- [x] Multi-track audio stream preservation and per-track silence inspection
+- [x] Batch processing CLI interface (`--batch`) for headless server workflows
+- [x] Vocal bandpass filtering (`85Hz–7800Hz`) and `volumedetect` noise-floor auto-calibration
 
 ---
 
 ## License
 
-SnipFlow is released under the **GNU General Public License v3.0 (GPL-3.0)**. See [LICENSE](LICENSE) for details. FFmpeg components are linked according to their respective LGPL/GPL builds.
+Licensed under the [GNU General Public License v3.0 (GPL-3.0-or-later)](LICENSE).

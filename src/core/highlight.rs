@@ -1,16 +1,11 @@
 use std::path::Path;
 use std::process::Command;
 use regex::Regex;
-use crate::core::ffmpeg::{find_binary, run_command};
+use crate::core::ffmpeg::{find_binary, get_audio_streams, run_command};
 use crate::error::{Result, SnipFlowError};
 
-/// Scans the audio track for sudden transient loudness peaks (gaming kills, screams, loud highlights).
-///
-/// Returns a list of peak presentation timestamps (PTS) in seconds.
-///
-/// # Arguments
-/// * `video_path` - Path to the video file
-/// * `peak_threshold_lufs` - Momentary loudness threshold in LUFS (e.g. `-14.0` or `-12.0`)
+/// Scans both audio transient loudness (EBU R128 with vocal/action bandpass) and video keyframe
+/// scene changes (`select='gt(scene,0.32)'`) to extract multimodal highlight timestamps in seconds.
 pub fn detect_peak_highlights(
     video_path: &Path,
     peak_threshold_lufs: f64,
@@ -19,10 +14,33 @@ pub fn detect_peak_highlights(
         return Err(SnipFlowError::FileNotFound(video_path.to_path_buf()));
     }
 
+    let mut combined_peaks = Vec::new();
+
+    // 1. Audio transient peak scan (if audio stream is present)
+    let has_audio = get_audio_streams(video_path)
+        .map(|tracks| !tracks.is_empty())
+        .unwrap_or(false);
+
+    if has_audio {
+        if let Ok(audio_peaks) = detect_audio_ebur128_peaks(video_path, peak_threshold_lufs) {
+            combined_peaks.extend(audio_peaks);
+        }
+    }
+
+    // 2. Visual keyframe scene-flux detection (captures silent screen transitions & visual bursts)
+    if let Ok(visual_peaks) = detect_visual_scene_highlights(video_path, 0.32) {
+        combined_peaks.extend(visual_peaks);
+    }
+
+    Ok(merge_and_dedup_peaks(&mut combined_peaks, 3.0))
+}
+
+/// Scans audio stream for momentary loudness spikes while attenuating keyboard click noise (>6kHz)
+/// and desk thumps (<120Hz).
+fn detect_audio_ebur128_peaks(video_path: &Path, peak_threshold_lufs: f64) -> Result<Vec<f64>> {
     let ffmpeg_path = find_binary("ffmpeg")?;
     let mut cmd = Command::new(ffmpeg_path);
 
-    // Bypasses video processing completely (-vn) and analyzes momentary loudness using EBU R128
     cmd.args([
         "-nostats",
         "-hide_banner",
@@ -32,20 +50,49 @@ pub fn detect_peak_highlights(
     cmd.arg(video_path);
     cmd.args([
         "-af",
-        "ebur128=metadata=1",
+        "highpass=f=120,lowpass=f=6000,ebur128=metadata=1",
         "-f",
         "null",
         "-",
     ]);
 
-    let output = run_command(&mut cmd, "ffmpeg detect peak highlights")?;
+    let output = run_command(&mut cmd, "ffmpeg detect audio peak highlights")?;
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     parse_ebur128_peaks(&stderr, peak_threshold_lufs)
 }
 
-/// Parses EBU R128 momentary loudness records from FFmpeg output
-fn parse_ebur128_peaks(stderr: &str, threshold_lufs: f64) -> Result<Vec<f64>> {
+/// Scans I-frames only (`-skip_frame nokey`) for visual scene transitions (`scene > threshold`).
+pub fn detect_visual_scene_highlights(video_path: &Path, scene_threshold: f64) -> Result<Vec<f64>> {
+    let ffmpeg_path = find_binary("ffmpeg")?;
+    let mut cmd = Command::new(ffmpeg_path);
+
+    let vf_expr = format!("select='gt(scene,{:.2})',showinfo", scene_threshold.clamp(0.1, 0.9));
+
+    cmd.args([
+        "-nostats",
+        "-hide_banner",
+        "-skip_frame", "nokey",
+        "-an",
+        "-i",
+    ]);
+    cmd.arg(video_path);
+    cmd.args([
+        "-vf",
+        &vf_expr,
+        "-f",
+        "null",
+        "-",
+    ]);
+
+    let output = run_command(&mut cmd, "ffmpeg detect visual scene highlights")?;
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    parse_showinfo_scene_peaks(&stderr)
+}
+
+/// Parses EBU R128 momentary loudness records from FFmpeg output.
+pub fn parse_ebur128_peaks(stderr: &str, threshold_lufs: f64) -> Result<Vec<f64>> {
     let re_record = Regex::new(r"t:\s*([0-9.]+)\s+TARGET:.*M:\s*([-\w.]+)")
         .map_err(|e| SnipFlowError::ParseError(e.to_string()))?;
 
@@ -58,7 +105,6 @@ fn parse_ebur128_peaks(stderr: &str, threshold_lufs: f64) -> Result<Vec<f64>> {
             let m_str = caps.get(2).map(|m| m.as_str()).unwrap_or("");
 
             if let (Ok(t), Ok(m)) = (t_str.parse::<f64>(), m_str.parse::<f64>()) {
-                // If momentary loudness exceeds threshold and is separated by at least 3 seconds from previous peak
                 if m >= threshold_lufs && (t - last_peak_time) > 3.0 {
                     peaks.push(t);
                     last_peak_time = t;
@@ -68,4 +114,42 @@ fn parse_ebur128_peaks(stderr: &str, threshold_lufs: f64) -> Result<Vec<f64>> {
     }
 
     Ok(peaks)
+}
+
+/// Parses `showinfo` filter timestamps (`pts_time:12.345`) from FFmpeg stderr.
+pub fn parse_showinfo_scene_peaks(stderr: &str) -> Result<Vec<f64>> {
+    let re_pts = Regex::new(r"pts_time:\s*([0-9]+(?:\.[0-9]+)?)")
+        .map_err(|e| SnipFlowError::ParseError(e.to_string()))?;
+
+    let mut peaks = Vec::new();
+    for line in stderr.lines() {
+        if let Some(caps) = re_pts.captures(line) {
+            if let Some(m) = caps.get(1) {
+                if let Ok(t) = m.as_str().parse::<f64>() {
+                    if t > 0.1 {
+                        peaks.push(t);
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(peaks)
+}
+
+/// Merges and deduplicates multimodal timestamps enforcing a minimum cooldown window.
+pub fn merge_and_dedup_peaks(peaks: &mut [f64], min_cooldown_sec: f64) -> Vec<f64> {
+    peaks.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
+
+    let mut result = Vec::new();
+    let mut last_ts = -min_cooldown_sec * 2.0;
+
+    for &t in peaks.iter() {
+        if t >= 0.0 && (t - last_ts) >= min_cooldown_sec {
+            result.push((t * 100.0).round() / 100.0);
+            last_ts = t;
+        }
+    }
+
+    result
 }

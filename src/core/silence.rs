@@ -32,7 +32,7 @@ pub fn parse_volumedetect_output(stderr: &str) -> Result<AudioVolumeProfile> {
         .unwrap_or(-3.0);
 
     // Adaptive noise floor calibration formula:
-    // Human speech sits around max_db - 12dB; continuous fan/air background noise sits below mean_db.
+    // After 85Hz-7800Hz voice bandpass filtering, continuous AC/fan hum is attenuated.
     // Setting threshold at mean_db - 6.5dB reliably catches pauses without cutting off quiet syllables.
     let rec_db = (mean_db - 6.5).clamp(-50.0, -18.0);
     let rounded_rec = (rec_db * 10.0).round() / 10.0;
@@ -44,7 +44,7 @@ pub fn parse_volumedetect_output(stderr: &str) -> Result<AudioVolumeProfile> {
     })
 }
 
-/// Analyzes audio stream volume distribution using FFmpeg volumedetect filter.
+/// Analyzes vocal band volume distribution using 85Hz-7800Hz bandpass + volumedetect filter.
 pub fn probe_audio_volume(
     video_path: &Path,
     track_index: Option<usize>,
@@ -77,7 +77,7 @@ pub fn probe_audio_volume(
         "-map",
         &map_arg,
         "-af",
-        "volumedetect",
+        "highpass=f=85,lowpass=f=7800,volumedetect",
         "-f",
         "null",
         "-",
@@ -90,6 +90,8 @@ pub fn probe_audio_volume(
 }
 
 /// Detects dead-air / silent intervals in an audio/video asset on a specific audio track.
+/// Applies an 85Hz-7800Hz vocal bandpass filter during detection to reject low-frequency HVAC/fan
+/// rumble and high-frequency coil whine without altering the exported audio stream.
 pub fn detect_silence_track(
     video_path: &Path,
     noise_db: f64,
@@ -117,7 +119,10 @@ pub fn detect_silence_track(
     let ffmpeg_path = find_binary("ffmpeg")?;
     let mut cmd = Command::new(ffmpeg_path);
 
-    let filter_arg = format!("silencedetect=noise={}dB:d={}", normalized_db, min_duration);
+    let filter_arg = format!(
+        "highpass=f=85,lowpass=f=7800,silencedetect=noise={}dB:d={}",
+        normalized_db, min_duration
+    );
 
     // Bypass video processing (-vn)
     cmd.args([
@@ -128,7 +133,6 @@ pub fn detect_silence_track(
     ]);
     cmd.arg(video_path);
 
-    // Map specific audio track if provided (e.g. 0:a:1 for secondary mic track)
     let map_arg = format!("0:a:{}", track_index.unwrap_or(0));
     cmd.args([
         "-map",
@@ -143,7 +147,8 @@ pub fn detect_silence_track(
     let output = run_command(&mut cmd, "ffmpeg detect silence")?;
     let stderr = String::from_utf8_lossy(&output.stderr);
 
-    parse_silencedetect_output(&stderr, video_path)
+    let total_duration = get_duration(video_path).ok();
+    parse_silencedetect_logs(&stderr, total_duration)
 }
 
 /// Detects dead-air / silent intervals on default primary audio track.
@@ -156,7 +161,10 @@ pub fn detect_silence(
 }
 
 /// Parses silencedetect logs from FFmpeg stderr and pairs intervals.
-fn parse_silencedetect_output(stderr: &str, video_path: &Path) -> Result<Vec<(f64, f64)>> {
+pub fn parse_silencedetect_logs(
+    stderr: &str,
+    fallback_duration: Option<f64>,
+) -> Result<Vec<(f64, f64)>> {
     let re_start = Regex::new(r"silence_start:\s*([0-9]+(?:\.[0-9]+)?)")
         .map_err(|e| SnipFlowError::ParseError(e.to_string()))?;
     let re_end = Regex::new(r"silence_end:\s*([0-9]+(?:\.[0-9]+)?)")
@@ -187,7 +195,7 @@ fn parse_silencedetect_output(stderr: &str, video_path: &Path) -> Result<Vec<(f6
 
     // If media concludes with ongoing silence, cap interval to video duration
     if let Some(start_val) = pending_start {
-        if let Ok(total_duration) = get_duration(video_path) {
+        if let Some(total_duration) = fallback_duration {
             if total_duration > start_val {
                 intervals.push((start_val, total_duration));
             }

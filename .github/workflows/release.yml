@@ -28,8 +28,8 @@ jobs:
             archive_ext: tar.gz
             bin_name: snipflow
 
-          # macOS Intel 64-bit
-          - os: macos-13
+          # macOS Intel 64-bit (Cross-compiled on macos-latest runner)
+          - os: macos-latest
             target: x86_64-apple-darwin
             archive_ext: tar.gz
             bin_name: snipflow
@@ -103,7 +103,7 @@ jobs:
               if ($BinFolder) {
                   Copy-Item -Path "$($BinFolder.FullName)\ffmpeg.exe" -Destination "$PkgDir\ffmpeg.exe"
                   Copy-Item -Path "$($BinFolder.FullName)\ffprobe.exe" -Destination "$PkgDir\ffprobe.exe"
-                  Write-Host "[✓] Successfully bundled ffmpeg.exe and ffprobe.exe into package"
+                  Write-Host "[OK] Successfully bundled ffmpeg.exe and ffprobe.exe into package"
               }
           } catch {
               Write-Warning "FFmpeg pre-bundle download failed: $_"

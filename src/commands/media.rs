@@ -114,16 +114,18 @@ pub async fn inspect_media_cmd(
         // 4. Audio tracks discovery
         let audio_tracks = get_audio_streams(&path).unwrap_or_default();
 
-        // 5. Audio silence detection, peak highlights and waveform peaks with silent video guard
-        let (silence_intervals, peak_highlights, waveform_peaks) = if !audio_tracks.is_empty() {
+        // 5. Multimodal peak highlights (audio EBU R128 + visual scene transitions)
+        let peak_highlights = detect_peak_highlights(&path, -14.0).unwrap_or_default();
+
+        // 6. Audio silence detection and waveform peaks with silent video guard
+        let (silence_intervals, waveform_peaks) = if !audio_tracks.is_empty() {
             let db = noise_db.unwrap_or(-30.0);
             let min_dur = min_silence_duration.unwrap_or(0.5);
             let silences = detect_silence_track(&path, db, min_dur, track_index).unwrap_or_default();
-            let peaks = detect_peak_highlights(&path, -14.0).unwrap_or_default();
             let waves = generate_waveform_peaks(&path, 300, track_index).unwrap_or_default();
-            (silences, peaks, waves)
+            (silences, waves)
         } else {
-            (Vec::new(), Vec::new(), Vec::new())
+            (Vec::new(), Vec::new())
         };
 
         // 6. Invert silence intervals to calculate clean active speech segments
@@ -209,10 +211,6 @@ pub async fn scan_peak_highlights_cmd(
         let path = PathBuf::from(&file_path);
         if !path.exists() {
             return Err(format!("File does not exist: {file_path}"));
-        }
-        let audio_tracks = get_audio_streams(&path).unwrap_or_default();
-        if audio_tracks.is_empty() {
-            return Ok(Vec::new());
         }
         detect_peak_highlights(&path, threshold_lufs.unwrap_or(-14.0)).map_err(|e| e.to_string())
     })

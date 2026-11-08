@@ -271,21 +271,29 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
       {/* Right: Export Engine Toggle & Actions */}
       <div className="flex items-center gap-1.5">
-        {/* Dual-Engine Mode Switcher */}
+        {/* Tri-State Engine Mode Switcher */}
         <button
           onClick={onToggleCutMode}
           className={`px-2 py-1 rounded text-[10px] font-bold border transition cursor-pointer ${
             cutMode === "stream_copy"
               ? "bg-zinc-850 text-cyan-400 border-cyan-800"
+              : cutMode === "smart_copy"
+              ? "bg-emerald-950/30 text-emerald-300 border-emerald-800 hover:bg-emerald-900/40"
               : "bg-purple-950/30 text-purple-300 border-purple-800 hover:bg-purple-900/40"
           }`}
           title={
             cutMode === "stream_copy"
-              ? "Current: STREAM COPY (Zero re-encoding, instant cut snapped to I-frames). Click to switch to EXACT FRAME."
-              : "Current: EXACT FRAME (Ultra-fast smart render, sub-frame boundary precision). Click to switch to STREAM COPY."
+              ? "Current: STREAM COPY (Zero re-encoding, instant cut snapped to I-frames). Click for SMART GOP."
+              : cutMode === "smart_copy"
+              ? "Current: SMART GOP (Micro-renders leading GOP boundary only, zero-reencode stream copy for 99% body). Click for EXACT FRAME."
+              : "Current: EXACT FRAME (Full segment ultra-fast re-encode). Click for STREAM COPY."
           }
         >
-          {cutMode === "stream_copy" ? "STREAM COPY" : "EXACT FRAME"}
+          {cutMode === "stream_copy"
+            ? "STREAM COPY"
+            : cutMode === "smart_copy"
+            ? "SMART GOP"
+            : "EXACT FRAME"}
         </button>
 
         {/* Destination folder picker */}
