@@ -932,7 +932,7 @@ export const App: React.FC = () => {
         <div className="flex items-center gap-2">
           <span className="font-bold tracking-widest text-zinc-100 text-[11px]">SNIPFLOW</span>
           <span className="text-zinc-600">/</span>
-          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">v0.6.0</span>
+          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">v0.6.1</span>
           {fileNameOnly && (
             <>
               <span className="text-zinc-700">|</span>

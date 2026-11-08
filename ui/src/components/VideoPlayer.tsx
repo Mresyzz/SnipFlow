@@ -118,8 +118,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               e.stopPropagation();
               onTimeUpdate(Math.max(0, currentTime - 0.04));
             }}
-            title="Step Back 1 Frame (Left Arrow)"
-            className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-850 transition cursor-pointer"
+            aria-label="Step back 1 frame (Left Arrow)" title="Step Back 1 Frame (Left Arrow)"
+            className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-850 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 transition cursor-pointer"
           >
             <SkipBack className="w-3.5 h-3.5" />
           </button>
@@ -130,8 +130,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               e.stopPropagation();
               onTogglePlay();
             }}
-            title="Play / Pause (Space or K)"
-            className="p-1 rounded text-zinc-200 hover:text-cyan-400 hover:bg-zinc-850 transition cursor-pointer"
+            aria-label={isPlaying ? "Pause (Space or K)" : "Play (Space or K)"} title={isPlaying ? "Pause (Space or K)" : "Play (Space or K)"}
+            className="p-1 rounded text-zinc-200 hover:text-cyan-400 hover:bg-zinc-850 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 transition cursor-pointer"
           >
             {isPlaying ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
           </button>
@@ -142,8 +142,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               e.stopPropagation();
               onTimeUpdate(Math.min(duration, currentTime + 0.04));
             }}
-            title="Step Forward 1 Frame (Right Arrow)"
-            className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-850 transition cursor-pointer"
+            aria-label="Step forward 1 frame (Right Arrow)" title="Step Forward 1 Frame (Right Arrow)"
+            className="p-1 rounded text-zinc-400 hover:text-zinc-100 hover:bg-zinc-850 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 transition cursor-pointer"
           >
             <SkipForward className="w-3.5 h-3.5" />
           </button>
@@ -172,7 +172,7 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 ? "bg-emerald-950/40 border-emerald-700 text-emerald-400"
                 : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300"
             }`}
-            title="Live Audition: Automatically skip silent intervals during playback (S)"
+            aria-pressed={skipSilencePreview} title="Live Audition: Automatically skip silent intervals during playback (S)"
           >
             <FastForward className="w-3 h-3" />
             <span>{skipSilencePreview ? "LIVE SKIP: ON" : "LIVE SKIP: OFF"}</span>
@@ -200,8 +200,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
               e.stopPropagation();
               setIsMuted(!isMuted);
             }}
-            className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850 transition cursor-pointer"
-            title={isMuted ? "Unmute" : "Mute"}
+            className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 transition cursor-pointer"
+            aria-label={isMuted ? "Unmute audio" : "Mute audio"} aria-pressed={isMuted} title={isMuted ? "Unmute" : "Mute"}
           >
             {isMuted ? <VolumeX className="w-3.5 h-3.5 text-zinc-500" /> : <Volume2 className="w-3.5 h-3.5" />}
           </button>
@@ -214,8 +214,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({
                 videoRef.current.requestFullscreen();
               }
             }}
-            className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850 transition cursor-pointer"
-            title="Fullscreen"
+            className="p-1 rounded text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 transition cursor-pointer"
+            aria-label="Toggle fullscreen" title="Fullscreen"
           >
             <Maximize2 className="w-3.5 h-3.5" />
           </button>

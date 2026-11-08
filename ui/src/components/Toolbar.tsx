@@ -136,7 +136,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
       <div className="flex items-center gap-1.5">
         <button
           onClick={onToggleMagneticSnap}
-          className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] border transition cursor-pointer ${
+          aria-pressed={isMagneticSnapEnabled}
+          className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] border transition cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
             isMagneticSnapEnabled
               ? "bg-zinc-800 border-zinc-650 text-cyan-400"
               : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300"
@@ -205,7 +206,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <button
             onClick={onZoomOut}
             disabled={zoomLevel <= 1}
-            className="p-0.5 text-zinc-400 hover:text-zinc-200 disabled:opacity-30 cursor-pointer"
+            aria-label="Zoom out timeline (-)"
+            className="p-0.5 rounded text-zinc-400 hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 disabled:opacity-30 cursor-pointer"
             title="Zoom Out (- or Mouse Wheel)"
           >
             <ZoomOut className="w-3 h-3" />
@@ -214,7 +216,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <button
             onClick={onZoomIn}
             disabled={zoomLevel >= 16}
-            className="p-0.5 text-zinc-400 hover:text-zinc-200 disabled:opacity-30 cursor-pointer"
+            aria-label="Zoom in timeline (+)"
+            className="p-0.5 rounded text-zinc-400 hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 disabled:opacity-30 cursor-pointer"
             title="Zoom In (+ or Mouse Wheel)"
           >
             <ZoomIn className="w-3 h-3" />
@@ -261,9 +264,11 @@ export const Toolbar: React.FC<ToolbarProps> = ({
           <div className="flex items-center gap-1 bg-zinc-850 px-1.5 py-0.5 rounded border border-zinc-750 text-[11px] text-zinc-300">
             <Disc className="w-3 h-3 text-zinc-500" />
             <select
+              aria-label="Select audio track"
+              title="Select Audio Track"
               value={selectedTrackIndex}
               onChange={(e) => onSelectTrack(Number(e.target.value))}
-              className="bg-transparent text-zinc-200 text-[11px] focus:outline-none cursor-pointer"
+              className="bg-transparent text-zinc-200 text-[11px] focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded cursor-pointer"
             >
               {audioTracks.map((t) => (
                 <option key={t.track_index} value={t.track_index} className="bg-zinc-900">
@@ -276,23 +281,27 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
         {/* Silence Threshold & Min Silence Duration & Auto-Calibration */}
         <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
-          <span className="text-zinc-500">THRESH</span>
+          <label htmlFor="silence-threshold" className="text-zinc-500 cursor-pointer">THRESH</label>
           <span className="text-zinc-300 w-11 text-right">{noiseDb}dB</span>
           <input
+            id="silence-threshold"
             type="range"
             min="-50"
             max="-15"
             step="1"
             value={noiseDb}
             onChange={(e) => onNoiseDbChange(Number(e.target.value))}
-            className="w-16 h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-zinc-400"
+            aria-label="Silence threshold"
+            title={`Silence Threshold: ${noiseDb}dB`}
+            className="w-16 h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-zinc-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400"
           />
 
           {/* Minimum Silence Duration Selector */}
           <select
+            aria-label="Minimum silence duration"
             value={minSilenceDuration}
             onChange={(e) => onMinSilenceDurationChange(Number(e.target.value))}
-            className="bg-zinc-850 hover:bg-zinc-800 text-zinc-300 border border-zinc-750 rounded px-1 py-0.5 text-[10px] font-mono focus:outline-none cursor-pointer"
+            className="bg-zinc-850 hover:bg-zinc-800 text-zinc-300 border border-zinc-750 rounded px-1 py-0.5 text-[10px] font-mono focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 cursor-pointer"
             title="Minimum Pause Duration to Treat as Silence"
           >
             <option value={0.3} className="bg-zinc-900">MIN 0.3s</option>
@@ -353,7 +362,8 @@ export const Toolbar: React.FC<ToolbarProps> = ({
         {/* Destination folder picker */}
         <button
           onClick={onSelectOutputDir}
-          className={`p-1 rounded border transition cursor-pointer ${
+          aria-label={customOutputDir ? `Custom export directory: ${customOutputDir}` : "Set custom export directory"}
+          className={`p-1 rounded border transition cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
             customOutputDir
               ? "bg-zinc-800 border-cyan-700 text-cyan-400"
               : "bg-zinc-850 hover:bg-zinc-800 border-zinc-750 text-zinc-400 hover:text-zinc-200"
@@ -365,9 +375,10 @@ export const Toolbar: React.FC<ToolbarProps> = ({
 
         {/* Container Format Selector (Lossless Remux Override) */}
         <select
+          aria-label="Output container format"
           value={containerFormat}
           onChange={(e) => onChangeContainerFormat(e.target.value as ContainerFormat)}
-          className="bg-zinc-850 hover:bg-zinc-800 text-zinc-300 border border-zinc-750 rounded px-1.5 py-1 text-[10px] font-mono focus:outline-none cursor-pointer"
+          className="bg-zinc-850 hover:bg-zinc-800 text-zinc-300 border border-zinc-750 rounded px-1.5 py-1 text-[10px] font-mono focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 cursor-pointer"
           title="Output Container Format (AUTO preserves original extension, or choose MP4/MKV/MOV for zero-reencode container remuxing)"
         >
           <option value="auto" className="bg-zinc-900">EXT: AUTO</option>
