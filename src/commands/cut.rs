@@ -2,9 +2,16 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::command;
 use snipflow::{
-    export_cmx3600_edl, export_fcpxml, extract_frame_snapshot, lossless_cut_with_mode,
-    seamless_merge_with_mode, CutMode,
+    batch_export_segments_with_mode, export_cmx3600_edl, export_fcpxml, extract_audio_stream,
+    extract_frame_snapshot, lossless_cut_with_mode, seamless_merge_with_mode, CutMode,
 };
+
+#[derive(Serialize, Clone, Debug)]
+pub struct AudioExportResult {
+    pub output_path: String,
+    pub elapsed_ms: f64,
+    pub duration: Option<f64>,
+}
 
 #[derive(Serialize, Clone, Debug)]
 pub struct SnapshotResult {
@@ -101,18 +108,20 @@ pub async fn batch_export_segments_cmd(
         };
 
         let t0 = std::time::Instant::now();
-        let mut created_clips = Vec::new();
+        let clip_paths = batch_export_segments_with_mode(
+            &src,
+            &segments,
+            &out_dir,
+            "clip",
+            &ext_str,
+            mode,
+        )
+        .map_err(|e| e.to_string())?;
 
-        for (idx, (start, end)) in segments.into_iter().enumerate() {
-            if end <= start {
-                continue;
-            }
-            let filename = format!("clip_{:03}.{}", idx + 1, ext_str);
-            let clip_path = out_dir.join(&filename);
-
-            lossless_cut_with_mode(&src, start, end, &clip_path, mode).map_err(|e| e.to_string())?;
-            created_clips.push(clip_path.to_string_lossy().to_string());
-        }
+        let created_clips: Vec<String> = clip_paths
+            .into_iter()
+            .map(|p| p.to_string_lossy().to_string())
+            .collect();
 
         let total_ms = t0.elapsed().as_secs_f64() * 1000.0;
 
@@ -240,4 +249,53 @@ pub async fn export_frame_snapshot_cmd(
     })
     .await
     .map_err(|e| format!("Snapshot export failed: {e}"))?
+}
+
+#[command]
+pub async fn export_audio_only_cmd(
+    source_path: String,
+    start: Option<f64>,
+    end: Option<f64>,
+    output_path_override: Option<String>,
+    track_index: Option<usize>,
+    format_override: Option<String>,
+) -> Result<AudioExportResult, String> {
+    tokio::task::spawn_blocking(move || {
+        let src = PathBuf::from(&source_path);
+        if !src.exists() {
+            return Err(format!("Source media not found: {source_path}"));
+        }
+
+        let stem = src.file_stem().unwrap_or_default().to_string_lossy();
+        let ext = format_override.unwrap_or_else(|| "m4a".to_string());
+
+        let dst = match output_path_override {
+            Some(p) => PathBuf::from(p),
+            None => {
+                let parent = src.parent().unwrap_or_else(|| Path::new("."));
+                let range_suffix = match (start, end) {
+                    (Some(s), Some(e)) => format!("_{:.1}s_{:.1}s", s, e),
+                    _ => "".to_string(),
+                };
+                parent.join(format!("{stem}{range_suffix}_audio.{ext}"))
+            }
+        };
+
+        let t0 = std::time::Instant::now();
+        extract_audio_stream(&src, start, end, &dst, track_index).map_err(|e| e.to_string())?;
+        let elapsed_ms = t0.elapsed().as_secs_f64() * 1000.0;
+
+        let duration = match (start, end) {
+            (Some(s), Some(e)) => Some(e - s),
+            _ => None,
+        };
+
+        Ok(AudioExportResult {
+            output_path: dst.to_string_lossy().to_string(),
+            elapsed_ms,
+            duration,
+        })
+    })
+    .await
+    .map_err(|e| format!("Audio export failed: {e}"))?
 }

@@ -5,7 +5,7 @@ set -eu
 
 REPO="Mresyzz/SnipFlow"
 BINARY_NAME="snipflow"
-FALLBACK_VERSION="v0.7.2"
+FALLBACK_VERSION="v0.7.3"
 
 # 1. Determine installation directory
 INSTALL_DIR="${SNIPFLOW_INSTALL_DIR:-"$HOME/.local/bin"}"
@@ -107,13 +107,38 @@ trap cleanup EXIT INT TERM
 echo "[*] Installing SnipFlow ${VERSION} (${TARGET})..."
 echo "[*] Downloading: ${DOWNLOAD_URL}"
 
-if [ "$DOWNLOADER" = "curl" ]; then
-  if ! curl -fL --retry 3 --connect-timeout 10 "$DOWNLOAD_URL" -o "$TMP_DIR/archive.tar.gz"; then
-    echo "[!] Download failed. Please verify release exists at https://github.com/${REPO}/releases" >&2
-    exit 1
+download_asset() {
+  _url="$1"
+  _dest="$2"
+  if [ "$DOWNLOADER" = "curl" ]; then
+    curl -fL --retry 2 --connect-timeout 10 "$_url" -o "$_dest" 2>/dev/null
+  else
+    wget -q "$_url" -O "$_dest" 2>/dev/null
   fi
-else
-  if ! wget -q "$DOWNLOAD_URL" -O "$TMP_DIR/archive.tar.gz"; then
+}
+
+if ! download_asset "$DOWNLOAD_URL" "$TMP_DIR/archive.tar.gz"; then
+  echo "[!] Asset for ${VERSION} not found or release still in build progress."
+  echo "[*] Querying releases for available verified ${TARGET} asset..."
+
+  if [ "$DOWNLOADER" = "curl" ]; then
+    ALL_RELEASES="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases" 2>/dev/null || true)"
+  else
+    ALL_RELEASES="$(wget -qO- "https://api.github.com/repos/${REPO}/releases" 2>/dev/null || true)"
+  fi
+
+  ALT_VERSION="$(printf '%s\n' "$ALL_RELEASES" | grep -B 15 -F "${TARGET}.tar.gz" | grep '"tag_name":' | head -n 1 | sed -E 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/' || true)"
+
+  if [ -n "$ALT_VERSION" ] && [ "$ALT_VERSION" != "$VERSION" ]; then
+    echo "[*] Found verified stable release: ${ALT_VERSION}"
+    ALT_URL="https://github.com/${REPO}/releases/download/${ALT_VERSION}/snipflow-${ALT_VERSION}-${TARGET}.tar.gz"
+    echo "[*] Downloading fallback: ${ALT_URL}"
+    if ! download_asset "$ALT_URL" "$TMP_DIR/archive.tar.gz"; then
+      echo "[!] Failed to download fallback release ${ALT_VERSION}." >&2
+      exit 1
+    fi
+    VERSION="$ALT_VERSION"
+  else
     echo "[!] Download failed. Please verify release exists at https://github.com/${REPO}/releases" >&2
     exit 1
   fi

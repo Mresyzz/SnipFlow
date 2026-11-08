@@ -171,6 +171,32 @@ fn test_same_path_overwrite_protection() {
     let existing = Path::new("Cargo.toml");
     let res = lossless_cut_with_mode(existing, 0.0, 5.0, existing, CutMode::StreamCopy);
     assert!(res.is_err(), "Exporting to the exact same path as source must be rejected");
+
+    let case_variant = Path::new("cargo.TOML");
+    let res_case = lossless_cut_with_mode(existing, 0.0, 5.0, case_variant, CutMode::StreamCopy);
+    assert!(res_case.is_err(), "Exporting with different case on same file must be rejected");
+}
+
+#[test]
+fn test_audio_extraction_same_path_protection() {
+    let existing = Path::new("Cargo.toml");
+    let res = snipflow::extract_audio_stream(existing, None, None, existing, None);
+    assert!(res.is_err(), "Audio extraction to same path must be rejected");
+}
+
+#[test]
+fn test_batch_export_empty_segments() {
+    let non_existent = Path::new("non_existent.mp4");
+    let out_dir = Path::new("test_out");
+    let res = snipflow::batch_export_segments_with_mode(
+        non_existent,
+        &[],
+        out_dir,
+        "clip",
+        "mp4",
+        CutMode::StreamCopy,
+    );
+    assert!(res.is_err(), "Non-existent source media should fail");
 }
 
 #[test]

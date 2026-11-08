@@ -62,6 +62,12 @@ export interface SnapshotResult {
   elapsed_ms: number;
 }
 
+export interface AudioExportResult {
+  output_path: string;
+  elapsed_ms: number;
+  duration?: number;
+}
+
 export interface CutResult {
   output_path: string;
   elapsed_ms: number;

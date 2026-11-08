@@ -3,6 +3,7 @@ import { DropZone } from "./components/DropZone";
 import { VideoPlayer } from "./components/VideoPlayer";
 import { TimelineCanvas } from "./components/TimelineCanvas";
 import { Toolbar } from "./components/Toolbar";
+import { MediaInspectorModal } from "./components/MediaInspectorModal";
 import { useShortcuts } from "./hooks/useShortcuts";
 import {
   MediaInspection,
@@ -11,6 +12,7 @@ import {
   SeamlessMergeResult,
   NleExportResult,
   SnapshotResult,
+  AudioExportResult,
   EnvironmentStatus,
   AudioStreamInfo,
   AudioVolumeProfile,
@@ -29,6 +31,8 @@ import {
   Layers,
   Zap,
   Clock,
+  Info,
+  Music,
 } from "lucide-react";
 
 /**
@@ -161,6 +165,9 @@ export const App: React.FC = () => {
   const [cutMode, setCutMode] = useState<CutMode>("smart_copy");
   const [containerFormat, setContainerFormat] = useState<ContainerFormat>("auto");
   const [isCalibrating, setIsCalibrating] = useState<boolean>(false);
+  const [inspectionData, setInspectionData] = useState<MediaInspection | null>(null);
+  const [isInspectorOpen, setIsInspectorOpen] = useState<boolean>(false);
+  const [volumeProfile, setVolumeProfile] = useState<AudioVolumeProfile | null>(null);
 
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [lastExportElapsedMs, setLastExportElapsedMs] = useState<number | null>(null);
@@ -298,6 +305,7 @@ export const App: React.FC = () => {
             trackIndex: selectedTrackIndex,
           });
 
+          setInspectionData(res);
           setDuration(res.duration);
           setKeyframes(res.keyframes);
           setSilenceIntervals(res.silence_intervals);
@@ -624,6 +632,7 @@ export const App: React.FC = () => {
           trackIndex: selectedTrackIndex,
         });
 
+        setVolumeProfile(profile);
         setNoiseDb(profile.recommended_silence_db);
 
         const reqId = ++rescanReqIdRef.current;
@@ -894,6 +903,39 @@ export const App: React.FC = () => {
     }
   }, [filePath, currentTime]);
 
+  // Extract audio-only stream losslessly or transcode
+  const handleExportAudioOnly = useCallback(
+    async (format: string = "m4a") => {
+      if (!filePath) return;
+      setIsExporting(true);
+      setStatusMessage(`EXTRACTING AUDIO STREAM [${format.toUpperCase()}]...`);
+      try {
+        if (typeof window !== "undefined" && "__TAURI_INTERNALS__" in window) {
+          const { invoke } = await import("@tauri-apps/api/core");
+          const res = await invoke<AudioExportResult>("export_audio_only_cmd", {
+            sourcePath: filePath,
+            start: inPoint,
+            end: outPoint,
+            outputPathOverride: null,
+            trackIndex: selectedTrackIndex,
+            formatOverride: format,
+          });
+          setLastExportElapsedMs(res.elapsed_ms);
+          setStatusMessage(
+            `AUDIO EXTRACTED (${res.elapsed_ms.toFixed(1)}ms): ${res.output_path}`
+          );
+        } else {
+          setStatusMessage("DESKTOP TAURI RUNTIME REQUIRED FOR AUDIO EXTRACTION");
+        }
+      } catch (err) {
+        setStatusMessage(`AUDIO EXTRACTION FAILED: ${err}`);
+      } finally {
+        setIsExporting(false);
+      }
+    },
+    [filePath, inPoint, outPoint, selectedTrackIndex]
+  );
+
   // Keyboard shortcuts
   useShortcuts({
     togglePlay: () => setIsPlaying((prev) => !prev),
@@ -927,6 +969,7 @@ export const App: React.FC = () => {
     redo: handleRedo,
     openFile: handleOpenMediaDialog,
     exportSnapshot: handleExportFrameSnapshot,
+    toggleInspector: () => setIsInspectorOpen((prev) => !prev),
   });
 
   const fileNameOnly = filePath ? filePath.split(/[/\\]/).pop() : null;
@@ -984,7 +1027,7 @@ export const App: React.FC = () => {
               SnipFlow
             </span>
             <span className="text-[10px] font-mono text-zinc-500 px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.06]">
-              v0.7.2
+              v0.7.3
             </span>
           </div>
 
@@ -1127,6 +1170,26 @@ export const App: React.FC = () => {
           >
             <FileCode className="w-3.5 h-3.5 text-zinc-400" />
             <span>NLE XML</span>
+          </button>
+
+          <button
+            onClick={() => handleExportAudioOnly("m4a")}
+            disabled={!filePath || isExporting}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-xs text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white disabled:opacity-40 transition cursor-pointer"
+            title="Extract Lossless Audio Stream (.m4a / .aac)"
+          >
+            <Music className="w-3.5 h-3.5 text-zinc-400" />
+            <span>Audio</span>
+          </button>
+
+          <button
+            onClick={() => setIsInspectorOpen(true)}
+            disabled={!filePath}
+            className="p-1.5 rounded-md bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-zinc-300 hover:text-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white disabled:opacity-40 transition cursor-pointer"
+            title="Technical Media Inspector (Ctrl+I)"
+            aria-label="Inspect media details"
+          >
+            <Info className="w-3.5 h-3.5" />
           </button>
 
           {activeSegments.length > 1 && (
@@ -1392,12 +1455,28 @@ export const App: React.FC = () => {
           </span>
           <span>
             <kbd className="px-1 py-0.2 rounded bg-white/[0.05] border border-white/[0.08] text-zinc-300">
+              CTRL+I
+            </kbd>{" "}
+            Info
+          </span>
+          <span>
+            <kbd className="px-1 py-0.2 rounded bg-white/[0.05] border border-white/[0.08] text-zinc-300">
               ENTER
             </kbd>{" "}
             Export
           </span>
         </div>
       </footer>
+
+      <MediaInspectorModal
+        isOpen={isInspectorOpen}
+        onClose={() => setIsInspectorOpen(false)}
+        inspection={inspectionData}
+        volumeProfile={volumeProfile}
+        duration={duration}
+        totalKeptSec={totalKeptSec}
+        savedSec={savedSec}
+      />
     </div>
   );
 };

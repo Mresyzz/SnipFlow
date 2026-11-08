@@ -2,8 +2,9 @@ pub mod core;
 pub mod error;
 
 pub use crate::core::cut::{
-    extract_frame_snapshot, find_next_gop_boundary, invert_silence, invert_silence_with_padding,
-    lossless_cut, lossless_cut_with_mode, seamless_merge, seamless_merge_with_mode, CutMode,
+    batch_export_segments_with_mode, extract_audio_stream, extract_frame_snapshot,
+    find_next_gop_boundary, invert_silence, invert_silence_with_padding, lossless_cut,
+    lossless_cut_with_mode, seamless_merge, seamless_merge_with_mode, CutMode,
 };
 pub use crate::core::ffmpeg::{
     find_binary, get_audio_streams, get_duration, get_internal_bin_dir, parse_duration_tag_str,

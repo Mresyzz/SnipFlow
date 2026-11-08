@@ -28,6 +28,15 @@ fn ensure_distinct_paths(video_path: &Path, output_path: &Path) -> Result<()> {
             "Output path cannot be identical to source media path".to_string(),
         ));
     }
+
+    let src_str = video_path.to_string_lossy();
+    let dst_str = output_path.to_string_lossy();
+    if src_str.eq_ignore_ascii_case(&dst_str) {
+        return Err(SnipFlowError::ParseError(
+            "Output path cannot resolve to the same file as source media path".to_string(),
+        ));
+    }
+
     if let (Ok(canon_src), Ok(canon_dst)) = (video_path.canonicalize(), output_path.canonicalize()) {
         if canon_src == canon_dst {
             return Err(SnipFlowError::ParseError(
@@ -193,6 +202,7 @@ fn execute_hybrid_smart_cut_with_keyframes(
 
         let ffmpeg_path = find_binary("ffmpeg")?;
         let mut cmd = Command::new(ffmpeg_path);
+        cmd.current_dir(&tmp_dir);
         cmd.args([
             "-y",
             "-f", "concat",
@@ -407,6 +417,7 @@ pub fn seamless_merge_with_mode(
     let is_mp4_family = is_mp4_family_container(&abs_output_path);
     let ffmpeg_path = find_binary("ffmpeg")?;
     let mut cmd = Command::new(ffmpeg_path);
+    cmd.current_dir(&tmp_dir);
 
     cmd.args([
         "-y",
@@ -482,6 +493,135 @@ pub fn extract_frame_snapshot(
 
     if !abs_output.is_file() {
         return Err(SnipFlowError::FileNotFound(abs_output));
+    }
+
+    Ok(())
+}
+
+/// Exports multiple distinct time intervals from source media into separate files in target directory.
+/// Pre-extracts keyframe metadata once when using SmartCopy to avoid redundant ffprobe invocations.
+pub fn batch_export_segments_with_mode(
+    video_path: &Path,
+    segments: &[(f64, f64)],
+    output_dir: &Path,
+    prefix: &str,
+    container_ext: &str,
+    mode: CutMode,
+) -> Result<Vec<PathBuf>> {
+    if !video_path.exists() {
+        return Err(SnipFlowError::FileNotFound(video_path.to_path_buf()));
+    }
+
+    if segments.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    std::fs::create_dir_all(output_dir)?;
+
+    let cached_keyframes = if mode == CutMode::SmartCopy {
+        get_keyframes(video_path).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+
+    let mut created_paths = Vec::with_capacity(segments.len());
+
+    for (idx, &(start, end)) in segments.iter().enumerate() {
+        if end <= start {
+            continue;
+        }
+
+        let clip_filename = format!("{}_{:03}.{}", prefix, idx + 1, container_ext);
+        let clip_path = output_dir.join(clip_filename);
+
+        match mode {
+            CutMode::StreamCopy => execute_single_cut(video_path, start, end, &clip_path, false)?,
+            CutMode::SmartCopy => execute_hybrid_smart_cut_with_keyframes(
+                video_path,
+                start,
+                end,
+                &clip_path,
+                &cached_keyframes,
+            )?,
+            CutMode::ExactFrame => execute_single_cut(video_path, start, end, &clip_path, true)?,
+        }
+
+        created_paths.push(clip_path);
+    }
+
+    Ok(created_paths)
+}
+
+/// Extracts audio stream from video file with optional time range and track selection.
+/// Supports zero-reencode lossless stream copy (.m4a/.aac/.opus) or standard transcode (.mp3/.wav).
+pub fn extract_audio_stream(
+    video_path: &Path,
+    start: Option<f64>,
+    end: Option<f64>,
+    output_path: &Path,
+    track_index: Option<usize>,
+) -> Result<()> {
+    if !video_path.exists() {
+        return Err(SnipFlowError::FileNotFound(video_path.to_path_buf()));
+    }
+
+    ensure_distinct_paths(video_path, output_path)?;
+
+    if let Some(parent) = output_path.parent() {
+        if !parent.as_os_str().is_empty() {
+            std::fs::create_dir_all(parent)?;
+        }
+    }
+
+    let ffmpeg_path = find_binary("ffmpeg")?;
+    let mut cmd = Command::new(ffmpeg_path);
+
+    cmd.arg("-y");
+
+    if let Some(s) = start {
+        cmd.args(["-ss", &format!("{:.3}", s.max(0.0))]);
+    }
+
+    cmd.args(["-i"]);
+    cmd.arg(video_path);
+
+    if let (Some(s), Some(e)) = (start, end) {
+        if e > s {
+            cmd.args(["-t", &format!("{:.3}", e - s)]);
+        }
+    }
+
+    let map_arg = format!("0:a:{}", track_index.unwrap_or(0));
+    cmd.args([
+        "-map",
+        &map_arg,
+        "-vn",
+    ]);
+
+    let ext = output_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("m4a")
+        .to_ascii_lowercase();
+
+    match ext.as_str() {
+        "mp3" => {
+            cmd.args(["-c:a", "libmp3lame", "-q:a", "2"]);
+        }
+        "wav" => {
+            cmd.args(["-c:a", "pcm_s16le"]);
+        }
+        _ => {
+            cmd.args(["-c:a", "copy"]);
+        }
+    }
+
+    cmd.arg(output_path);
+
+    run_command(&mut cmd, "ffmpeg extract audio")?;
+
+    if !output_path.is_file() {
+        return Err(SnipFlowError::FileNotFound(output_path.to_path_buf()));
     }
 
     Ok(())

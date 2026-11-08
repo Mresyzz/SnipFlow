@@ -20,6 +20,7 @@ interface ShortcutActions {
   redo?: () => void;
   openFile?: () => void;
   exportSnapshot?: () => void;
+  toggleInspector?: () => void;
 }
 
 export function useShortcuts({
@@ -42,6 +43,7 @@ export function useShortcuts({
   redo,
   openFile,
   exportSnapshot,
+  toggleInspector,
 }: ShortcutActions) {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -68,6 +70,14 @@ export function useShortcuts({
         if (redo) {
           e.preventDefault();
           redo();
+        }
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.code === "KeyI") {
+        if (toggleInspector) {
+          e.preventDefault();
+          toggleInspector();
         }
         return;
       }
@@ -187,5 +197,6 @@ export function useShortcuts({
     redo,
     openFile,
     exportSnapshot,
+    toggleInspector,
   ]);
 }

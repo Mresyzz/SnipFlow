@@ -24,13 +24,14 @@ fn is_supported_video_file(path: &Path) -> bool {
 }
 
 fn print_cli_help() {
-    println!("SnipFlow v0.7.2 - Zero-Reencode Video Clipper & Silence Stripper");
+    println!("SnipFlow v0.7.3 - Zero-Reencode Video Clipper & Silence Stripper");
     println!();
     println!("USAGE:");
     println!("  snipflow                                      Launch desktop studio GUI");
     println!("  snipflow --cli <input> [output]               Single-file silence strip & cut");
     println!("  snipflow --batch <dir_or_files...> [options]  Headless batch silence stripping");
     println!("  snipflow --snapshot <input> <sec> [output]    Extract high-fidelity frame snapshot");
+    println!("  snipflow --audio <input> [output.m4a/mp3]     Extract audio stream losslessly");
     println!();
     println!("BATCH OPTIONS:");
     println!("  --out-dir <dir>       Output directory for cleaned videos");
@@ -297,6 +298,26 @@ fn main() {
                 println!("[OK] Extracted snapshot at {:.2}s -> {}", sec, output_path.display());
                 return;
             }
+            "--audio" => {
+                if args.len() < 3 {
+                    eprintln!("[!] Missing arguments for --audio: snipflow --audio <input> [output.m4a/mp3]");
+                    std::process::exit(1);
+                }
+                let input_path = PathBuf::from(&args[2]);
+                let output_path = if args.len() > 3 {
+                    PathBuf::from(&args[3])
+                } else {
+                    let parent = input_path.parent().unwrap_or_else(|| Path::new("."));
+                    let stem = input_path.file_stem().and_then(|s| s.to_str()).unwrap_or("audio");
+                    parent.join(format!("{}_extracted_audio.m4a", stem))
+                };
+                if let Err(e) = snipflow::extract_audio_stream(&input_path, None, None, &output_path, None) {
+                    eprintln!("[!] Audio extraction failed: {e}");
+                    std::process::exit(1);
+                }
+                println!("[OK] Audio stream extracted -> {}", output_path.display());
+                return;
+            }
             "--batch" => {
                 if let Err(e) = run_batch_mode(&args[2..]) {
                     eprintln!("[!] Batch execution failed: {e}");
@@ -357,6 +378,7 @@ fn main() {
             commands::cut::export_seamless_merge_cmd,
             commands::cut::export_nle_timeline_cmd,
             commands::cut::export_frame_snapshot_cmd,
+            commands::cut::export_audio_only_cmd,
         ])
         .run(tauri::generate_context!())
         .expect("Error while running SnipFlow desktop application");
