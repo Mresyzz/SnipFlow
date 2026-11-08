@@ -2,21 +2,15 @@ import React from "react";
 import {
   Magnet,
   Scissors,
-  Download,
-  Clock,
   ZoomIn,
   ZoomOut,
   Disc,
-  Layers,
   Sparkles,
-  Zap,
-  FolderOpen,
   Activity,
-  FileCode,
-  Undo2,
   Flame,
+  Sliders,
 } from "lucide-react";
-import { AudioStreamInfo, ContainerFormat, CutMode } from "../types";
+import { AudioStreamInfo } from "../types";
 
 interface ToolbarProps {
   inPoint: number | null;
@@ -27,83 +21,58 @@ interface ToolbarProps {
   noiseDb: number;
   minSilenceDuration: number;
   zoomLevel: number;
-  isExporting: boolean;
   isCalibrating: boolean;
-  lastExportElapsedMs: number | null;
   silenceCount: number;
   audioTracks: AudioStreamInfo[];
   selectedTrackIndex: number;
   highlightCount: number;
-  activeSegmentCount: number;
-  undoCount: number;
-  customOutputDir: string | null;
-  cutMode: CutMode;
-  containerFormat: ContainerFormat;
-  onChangeContainerFormat: (fmt: ContainerFormat) => void;
-  onToggleCutMode: () => void;
+  totalKeptSec: number;
+  savedSec: number;
   onAutoCalibrateNoiseFloor: () => void;
   onSelectTrack: (trackIndex: number) => void;
   onToggleMagneticSnap: () => void;
   onNoiseDbChange: (db: number) => void;
   onMinSilenceDurationChange: (minDur: number) => void;
-  onUndo: () => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onMarkIn: () => void;
   onMarkOut: () => void;
+  onSliceAtPlayhead: () => void;
   onSnapInToKeyframe: () => void;
   onStripSilence: () => void;
   onNextHighlight: () => void;
   onBuildHighlightReel: () => void;
-  onSelectOutputDir: () => void;
-  onExportNleTimeline: () => void;
-  onExport: () => void;
-  onBatchExport: () => void;
-  onSeamlessMerge: () => void;
 }
 
 export const Toolbar: React.FC<ToolbarProps> = ({
   inPoint,
   outPoint,
-  currentTime,
   keyframes,
   isMagneticSnapEnabled,
   noiseDb,
   minSilenceDuration,
   zoomLevel,
-  isExporting,
   isCalibrating,
-  lastExportElapsedMs,
   silenceCount,
   audioTracks,
   selectedTrackIndex,
   highlightCount,
-  activeSegmentCount,
-  undoCount,
-  customOutputDir,
-  cutMode,
-  containerFormat,
-  onChangeContainerFormat,
-  onToggleCutMode,
+  totalKeptSec,
+  savedSec,
   onAutoCalibrateNoiseFloor,
   onSelectTrack,
   onToggleMagneticSnap,
   onNoiseDbChange,
   onMinSilenceDurationChange,
-  onUndo,
   onZoomIn,
   onZoomOut,
   onMarkIn,
   onMarkOut,
+  onSliceAtPlayhead,
   onSnapInToKeyframe,
   onStripSilence,
   onNextHighlight,
   onBuildHighlightReel,
-  onSelectOutputDir,
-  onExportNleTimeline,
-  onExport,
-  onBatchExport,
-  onSeamlessMerge,
 }) => {
   const selectionDuration =
     inPoint !== null && outPoint !== null ? Math.max(0, outPoint - inPoint) : null;
@@ -131,58 +100,63 @@ export const Toolbar: React.FC<ToolbarProps> = ({
   const formatSec = (s: number | null) => (s !== null ? `${s.toFixed(2)}s` : "--");
 
   return (
-    <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-1.5 bg-zinc-900 border border-zinc-800 rounded font-mono text-xs select-none">
-      {/* Left: Trim Markers & Snapping & Keyframe Status */}
+    <div className="min-h-10 px-3.5 py-1.5 bg-[#111115] border-b border-white/[0.06] flex flex-wrap items-center justify-between gap-2 text-xs select-none">
+      {/* Left: Split, Snap, In/Out Trim Markers & I-Frame Alignment */}
       <div className="flex items-center gap-1.5">
+        <button
+          onClick={onSliceAtPlayhead}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition cursor-pointer"
+          title="Split active clip at playhead (X)"
+        >
+          <Scissors className="w-3.5 h-3.5 text-zinc-400" />
+          <span>Split</span>
+        </button>
+
         <button
           onClick={onToggleMagneticSnap}
           aria-pressed={isMagneticSnapEnabled}
-          className={`flex items-center gap-1 px-2 py-1 rounded text-[11px] border transition cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
+          className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md border focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition cursor-pointer ${
             isMagneticSnapEnabled
-              ? "bg-zinc-800 border-zinc-650 text-cyan-400"
-              : "bg-zinc-900 border-zinc-800 text-zinc-500 hover:text-zinc-300"
+              ? "bg-white text-black border-white font-medium"
+              : "bg-white/[0.03] border-white/[0.08] text-zinc-400 hover:text-zinc-200"
           }`}
           title="Toggle Keyframe Magnetic Snap"
         >
-          <Magnet className="w-3 h-3" />
-          <span>SNAP</span>
+          <Magnet className="w-3.5 h-3.5" />
+          <span>Snap</span>
         </button>
 
-        <div className="h-3.5 w-px bg-zinc-800 mx-0.5" />
+        <div className="h-3.5 w-px bg-white/[0.08] mx-0.5" />
 
         <button
           onClick={onMarkIn}
-          className="px-2 py-1 rounded bg-zinc-850 hover:bg-zinc-800 text-zinc-200 border border-zinc-750 text-[11px] transition cursor-pointer"
-          title="Set In-Point (I)"
+          className="px-2 py-1 rounded-md bg-white/[0.04] hover:bg-white/[0.08] text-zinc-200 border border-white/[0.08] font-mono text-[11px] tabular-nums focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition cursor-pointer"
+          title="Set In-Point at Playhead (I)"
         >
-          IN: {formatSec(inPoint)}
+          IN {formatSec(inPoint)}
         </button>
         <button
           onClick={onMarkOut}
-          className="px-2 py-1 rounded bg-zinc-850 hover:bg-zinc-800 text-zinc-200 border border-zinc-750 text-[11px] transition cursor-pointer"
-          title="Set Out-Point (O)"
+          className="px-2 py-1 rounded-md bg-white/[0.04] hover:bg-white/[0.08] text-zinc-200 border border-white/[0.08] font-mono text-[11px] tabular-nums focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition cursor-pointer"
+          title="Set Out-Point at Playhead (O)"
         >
-          OUT: {formatSec(outPoint)}
+          OUT {formatSec(outPoint)}
         </button>
 
-        <span className="text-[10px] text-zinc-500 font-mono ml-1">
-          POS: {currentTime.toFixed(2)}s
-        </span>
-
         {selectionDuration !== null && (
-          <span className="text-[11px] text-zinc-400 font-semibold px-1">
+          <span className="text-[11px] text-zinc-400 font-mono tabular-nums px-1">
             [{selectionDuration.toFixed(2)}s]
           </span>
         )}
 
-        {/* I-Frame Alignment Status LED with exact millisecond drift */}
+        {/* I-Frame Alignment Status Badge with exact millisecond drift */}
         {inPoint !== null && keyframes.length > 0 && driftMs !== null && (
           <button
             onClick={onSnapInToKeyframe}
-            className={`flex items-center gap-1 px-2 py-0.5 rounded text-[10px] border transition cursor-pointer ${
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-md font-mono text-[10px] border focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition cursor-pointer ${
               isKeyframeAligned
-                ? "bg-emerald-950/20 border-emerald-800 text-emerald-400"
-                : "bg-amber-950/20 border-amber-800 text-amber-400 hover:bg-amber-900/30"
+                ? "bg-white/[0.08] border-white/25 text-white"
+                : "bg-white/[0.03] border-white/[0.08] text-zinc-400 hover:text-white hover:border-white/20"
             }`}
             title={
               isKeyframeAligned
@@ -190,99 +164,47 @@ export const Toolbar: React.FC<ToolbarProps> = ({
                 : `Drift from GOP boundary: ${driftMs > 0 ? "+" : ""}${driftMs.toFixed(0)}ms. Click to snap to nearest I-frame`
             }
           >
-            <svg className="w-1.5 h-1.5 fill-current" viewBox="0 0 6 6">
-              <circle cx="3" cy="3" r="3" />
-            </svg>
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                isKeyframeAligned ? "bg-white" : "bg-zinc-500"
+              }`}
+            />
             <span>
               {isKeyframeAligned
                 ? "I-FRAME"
-                : `SNAP (${driftMs > 0 ? "+" : ""}${driftMs.toFixed(0)}ms)`}
+                : `ALIGN (${driftMs > 0 ? "+" : ""}${driftMs.toFixed(0)}ms)`}
             </span>
-          </button>
-        )}
-
-        {/* Timeline Zoom (up to 16x, also controllable via mouse wheel on timeline) */}
-        <div className="flex items-center bg-zinc-950 px-1 py-0.5 rounded border border-zinc-800 ml-1">
-          <button
-            onClick={onZoomOut}
-            disabled={zoomLevel <= 1}
-            aria-label="Zoom out timeline (-)"
-            className="p-0.5 rounded text-zinc-400 hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 disabled:opacity-30 cursor-pointer"
-            title="Zoom Out (- or Mouse Wheel)"
-          >
-            <ZoomOut className="w-3 h-3" />
-          </button>
-          <span className="text-[10px] text-zinc-500 px-1">{zoomLevel}x</span>
-          <button
-            onClick={onZoomIn}
-            disabled={zoomLevel >= 16}
-            aria-label="Zoom in timeline (+)"
-            className="p-0.5 rounded text-zinc-400 hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 disabled:opacity-30 cursor-pointer"
-            title="Zoom In (+ or Mouse Wheel)"
-          >
-            <ZoomIn className="w-3 h-3" />
-          </button>
-        </div>
-
-        {/* Non-destructive Undo Button */}
-        {undoCount > 0 && (
-          <button
-            onClick={onUndo}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-850 hover:bg-zinc-800 text-zinc-300 border border-zinc-750 text-[10px] cursor-pointer ml-1"
-            title={`Undo last clip edit (Ctrl+Z) · ${undoCount} steps available`}
-          >
-            <Undo2 className="w-3 h-3 text-cyan-400" />
-            <span>UNDO</span>
           </button>
         )}
       </div>
 
-      {/* Middle: Audio Track & Silence Threshold & Auto-Calibration */}
-      <div className="flex items-center gap-1.5">
-        {highlightCount > 0 && (
-          <div className="flex items-center gap-1">
-            <button
-              onClick={onNextHighlight}
-              className="flex items-center gap-1 px-2 py-1 rounded bg-zinc-850 hover:bg-zinc-800 text-amber-400 border border-zinc-750 text-[11px] cursor-pointer"
-              title="Jump to Next Peak Highlight (H)"
-            >
-              <Sparkles className="w-3 h-3" />
-              <span>PEAK ({highlightCount})</span>
-            </button>
-            <button
-              onClick={onBuildHighlightReel}
-              className="flex items-center gap-1 px-2 py-1 rounded bg-amber-950/30 hover:bg-amber-900/40 text-amber-300 border border-amber-800/80 text-[10px] font-bold cursor-pointer transition"
-              title="Convert all detected multimodal peaks into active highlight clips (-2.5s to +4.5s around each peak) for instant Highlight Reel export (Ctrl+Z to Undo)"
-            >
-              <Flame className="w-3 h-3 text-amber-400" />
-              <span>REEL</span>
-            </button>
-          </div>
-        )}
-
+      {/* Center: Audio Track, Silence Threshold, Auto-Detect & Highlight Reel */}
+      <div className="flex items-center gap-2">
         {audioTracks.length > 1 && (
-          <div className="flex items-center gap-1 bg-zinc-850 px-1.5 py-0.5 rounded border border-zinc-750 text-[11px] text-zinc-300">
-            <Disc className="w-3 h-3 text-zinc-500" />
+          <div className="flex items-center gap-1 bg-white/[0.04] px-2 py-1 rounded-md border border-white/[0.08] text-[11px] text-zinc-300">
+            <Disc className="w-3 h-3 text-zinc-400" />
             <select
               aria-label="Select audio track"
               title="Select Audio Track"
               value={selectedTrackIndex}
               onChange={(e) => onSelectTrack(Number(e.target.value))}
-              className="bg-transparent text-zinc-200 text-[11px] focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 rounded cursor-pointer"
+              className="bg-transparent text-zinc-200 text-[11px] focus:outline-none focus-visible:ring-1 focus-visible:ring-white rounded cursor-pointer"
             >
               {audioTracks.map((t) => (
                 <option key={t.track_index} value={t.track_index} className="bg-zinc-900">
-                  {t.title ? `${t.title}` : `A${t.track_index + 1}`}
+                  {t.title ? `${t.title}` : `Track A${t.track_index + 1}`}
                 </option>
               ))}
             </select>
           </div>
         )}
 
-        {/* Silence Threshold & Min Silence Duration & Auto-Calibration */}
-        <div className="flex items-center gap-1.5 text-[11px] text-zinc-400">
-          <label htmlFor="silence-threshold" className="text-zinc-500 cursor-pointer">THRESH</label>
-          <span className="text-zinc-300 w-11 text-right">{noiseDb}dB</span>
+        {/* Silence Threshold Slider */}
+        <div className="flex items-center gap-2 text-xs text-zinc-400">
+          <Sliders className="w-3.5 h-3.5 text-zinc-400" />
+          <label htmlFor="silence-threshold" className="text-zinc-400 cursor-pointer">
+            Threshold
+          </label>
           <input
             id="silence-threshold"
             type="range"
@@ -293,162 +215,114 @@ export const Toolbar: React.FC<ToolbarProps> = ({
             onChange={(e) => onNoiseDbChange(Number(e.target.value))}
             aria-label="Silence threshold"
             title={`Silence Threshold: ${noiseDb}dB`}
-            className="w-16 h-1 bg-zinc-800 rounded appearance-none cursor-pointer accent-zinc-400 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400"
+            className="w-20 h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-white focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white"
           />
+          <span className="font-mono text-[11px] text-zinc-200 w-11 text-right tabular-nums">
+            {noiseDb} dB
+          </span>
 
           {/* Minimum Silence Duration Selector */}
           <select
             aria-label="Minimum silence duration"
             value={minSilenceDuration}
             onChange={(e) => onMinSilenceDurationChange(Number(e.target.value))}
-            className="bg-zinc-850 hover:bg-zinc-800 text-zinc-300 border border-zinc-750 rounded px-1 py-0.5 text-[10px] font-mono focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 cursor-pointer"
+            className="bg-white/[0.04] hover:bg-white/[0.08] text-zinc-200 border border-white/[0.08] rounded-md px-2 py-1 text-xs font-mono focus:outline-none focus-visible:ring-1 focus-visible:ring-white cursor-pointer"
             title="Minimum Pause Duration to Treat as Silence"
           >
-            <option value={0.3} className="bg-zinc-900">MIN 0.3s</option>
-            <option value={0.5} className="bg-zinc-900">MIN 0.5s</option>
-            <option value={0.8} className="bg-zinc-900">MIN 0.8s</option>
-            <option value={1.2} className="bg-zinc-900">MIN 1.2s</option>
+            <option value={0.3} className="bg-zinc-900">Min 0.3s</option>
+            <option value={0.5} className="bg-zinc-900">Min 0.5s</option>
+            <option value={0.8} className="bg-zinc-900">Min 0.8s</option>
+            <option value={1.2} className="bg-zinc-900">Min 1.2s</option>
           </select>
 
           {/* Auto Calibration Button */}
           <button
             onClick={onAutoCalibrateNoiseFloor}
             disabled={isCalibrating}
-            className="flex items-center gap-1 px-1.5 py-0.5 rounded bg-zinc-850 hover:bg-zinc-800 text-zinc-300 border border-zinc-750 text-[10px] cursor-pointer disabled:opacity-40"
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/[0.04] hover:bg-white/[0.08] text-zinc-200 border border-white/[0.08] text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white cursor-pointer disabled:opacity-40 transition"
             title="Analyze background noise floor via volumedetect and calculate optimal threshold"
           >
-            <Activity className={`w-2.5 h-2.5 ${isCalibrating ? "animate-spin text-cyan-400" : "text-zinc-400"}`} />
-            <span>{isCalibrating ? "CAL..." : "AUTO CAL"}</span>
+            <Activity className={`w-3 h-3 ${isCalibrating ? "animate-spin text-white" : "text-zinc-400"}`} />
+            <span>{isCalibrating ? "Calibrating..." : "Auto Detect"}</span>
+          </button>
+
+          {/* Purge / Restore Speech Segments */}
+          <button
+            onClick={onStripSilence}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/[0.04] hover:bg-white/[0.08] text-zinc-200 border border-white/[0.08] text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white cursor-pointer transition"
+            title="Recompute and restore all non-silent speech clips from current silence intervals"
+          >
+            <Scissors className="w-3 h-3 text-zinc-400" />
+            <span>Strip Silence ({silenceCount})</span>
           </button>
         </div>
 
-        <button
-          onClick={onStripSilence}
-          className="flex items-center gap-1 px-2 py-1 rounded bg-zinc-850 hover:bg-zinc-800 text-rose-400 border border-zinc-750 text-[11px] cursor-pointer"
-          title="Select first voice segment"
-        >
-          <Scissors className="w-3 h-3" />
-          <span>PURGE SILENCE ({silenceCount})</span>
-        </button>
+        {/* Multimodal Peak Highlights & Highlight Reel Builder */}
+        {highlightCount > 0 && (
+          <div className="flex items-center gap-1">
+            <button
+              onClick={onNextHighlight}
+              className="flex items-center gap-1 px-2 py-1 rounded-md bg-white/[0.04] hover:bg-white/[0.08] text-zinc-200 border border-white/[0.08] text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white cursor-pointer transition"
+              title="Jump to Next Peak Highlight (H)"
+            >
+              <Sparkles className="w-3 h-3 text-zinc-300" />
+              <span>Peak ({highlightCount})</span>
+            </button>
+            <button
+              onClick={onBuildHighlightReel}
+              className="flex items-center gap-1 px-2 py-1 rounded-md bg-white text-black hover:bg-zinc-200 font-medium text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white cursor-pointer transition"
+              title="Convert all detected multimodal peaks into active highlight clips (-2.5s to +4.5s around each peak) for instant Highlight Reel export (Ctrl+Z to Undo)"
+            >
+              <Flame className="w-3 h-3" />
+              <span>Reel</span>
+            </button>
+          </div>
+        )}
       </div>
 
-      {/* Right: Export Engine Toggle & Actions */}
-      <div className="flex items-center gap-1.5">
-        {/* Tri-State Engine Mode Switcher */}
-        <button
-          onClick={onToggleCutMode}
-          className={`px-2 py-1 rounded text-[10px] font-bold border transition cursor-pointer ${
-            cutMode === "stream_copy"
-              ? "bg-zinc-850 text-cyan-400 border-cyan-800"
-              : cutMode === "smart_copy"
-              ? "bg-emerald-950/30 text-emerald-300 border-emerald-800 hover:bg-emerald-900/40"
-              : "bg-purple-950/30 text-purple-300 border-purple-800 hover:bg-purple-900/40"
-          }`}
-          title={
-            cutMode === "stream_copy"
-              ? "Current: STREAM COPY (Zero re-encoding, instant cut snapped to I-frames). Click for SMART GOP."
-              : cutMode === "smart_copy"
-              ? "Current: SMART GOP (Micro-renders leading GOP boundary only, zero-reencode stream copy for 99% body). Click for EXACT FRAME."
-              : "Current: EXACT FRAME (Full segment ultra-fast re-encode). Click for STREAM COPY."
-          }
-        >
-          {cutMode === "stream_copy"
-            ? "STREAM COPY"
-            : cutMode === "smart_copy"
-            ? "SMART GOP"
-            : "EXACT FRAME"}
-        </button>
-
-        {/* Destination folder picker */}
-        <button
-          onClick={onSelectOutputDir}
-          aria-label={customOutputDir ? `Custom export directory: ${customOutputDir}` : "Set custom export directory"}
-          className={`p-1 rounded border transition cursor-pointer focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 ${
-            customOutputDir
-              ? "bg-zinc-800 border-cyan-700 text-cyan-400"
-              : "bg-zinc-850 hover:bg-zinc-800 border-zinc-750 text-zinc-400 hover:text-zinc-200"
-          }`}
-          title={customOutputDir ? `Output: ${customOutputDir}` : "Set Custom Export Directory"}
-        >
-          <FolderOpen className="w-3.5 h-3.5" />
-        </button>
-
-        {/* Container Format Selector (Lossless Remux Override) */}
-        <select
-          aria-label="Output container format"
-          value={containerFormat}
-          onChange={(e) => onChangeContainerFormat(e.target.value as ContainerFormat)}
-          className="bg-zinc-850 hover:bg-zinc-800 text-zinc-300 border border-zinc-750 rounded px-1.5 py-1 text-[10px] font-mono focus:outline-none focus-visible:ring-1 focus-visible:ring-cyan-400 cursor-pointer"
-          title="Output Container Format (AUTO preserves original extension, or choose MP4/MKV/MOV for zero-reencode container remuxing)"
-        >
-          <option value="auto" className="bg-zinc-900">EXT: AUTO</option>
-          <option value="mp4" className="bg-zinc-900">EXT: .MP4</option>
-          <option value="mkv" className="bg-zinc-900">EXT: .MKV</option>
-          <option value="mov" className="bg-zinc-900">EXT: .MOV</option>
-        </select>
-
-        {lastExportElapsedMs !== null && (
-          <span className="text-[10px] text-emerald-400 mr-1 font-mono">
-            {lastExportElapsedMs.toFixed(1)}ms
+      {/* Right: Compression Summary & Timeline Zoom */}
+      <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 text-xs">
+          <span className="text-zinc-400">
+            Kept{" "}
+            <strong className="text-zinc-200 font-medium font-mono tabular-nums">
+              {totalKeptSec.toFixed(1)}s
+            </strong>
           </span>
-        )}
+          <span className="text-zinc-600">·</span>
+          <span className="text-zinc-400">
+            Saved{" "}
+            <strong className="text-white font-medium font-mono tabular-nums">
+              {savedSec.toFixed(1)}s
+            </strong>
+          </span>
+        </div>
 
-        {/* NLE Project Export (CMX 3600 EDL + FCPXML v1.9) */}
-        <button
-          onClick={onExportNleTimeline}
-          disabled={isExporting}
-          className="flex items-center gap-1 px-2 py-1 rounded bg-zinc-850 hover:bg-zinc-800 text-amber-300 border border-zinc-750 text-[11px] cursor-pointer disabled:opacity-40 transition"
-          title="Export Non-Destructive NLE Timeline (.edl + .fcpxml) for DaVinci Resolve, Premiere Pro & Final Cut Pro"
-        >
-          <FileCode className="w-3 h-3" />
-          <span>EDL/XML</span>
-        </button>
+        <div className="h-3.5 w-px bg-white/[0.08]" />
 
-        {/* Seamless Merge Button (Zero-reencode single continuous file) */}
-        {activeSegmentCount > 1 && (
+        <div className="flex items-center gap-1">
           <button
-            onClick={onSeamlessMerge}
-            disabled={isExporting}
-            className="flex items-center gap-1 px-2.5 py-1 rounded bg-emerald-950/30 hover:bg-emerald-900/40 text-emerald-400 border border-emerald-800 text-[11px] font-bold cursor-pointer disabled:opacity-40 transition"
-            title="Remove all silent pauses and merge into a single seamless continuous video"
+            onClick={onZoomOut}
+            disabled={zoomLevel <= 1}
+            aria-label="Zoom out timeline (-)"
+            className="p-1 rounded text-zinc-400 hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white disabled:opacity-30 cursor-pointer"
+            title="Zoom Out (- or Mouse Wheel)"
           >
-            <Zap className="w-3 h-3" />
-            <span>SEAMLESS MERGE ({activeSegmentCount})</span>
+            <ZoomOut className="w-3.5 h-3.5" />
           </button>
-        )}
-
-        {/* Batch clips export */}
-        {activeSegmentCount > 1 && (
+          <span className="font-mono text-[11px] text-zinc-300 w-8 text-center tabular-nums">
+            {zoomLevel}x
+          </span>
           <button
-            onClick={onBatchExport}
-            disabled={isExporting}
-            className="flex items-center gap-1 px-2 py-1 rounded bg-zinc-850 hover:bg-zinc-800 text-zinc-300 border border-zinc-750 text-[11px] cursor-pointer disabled:opacity-40"
-            title="Batch Export All Clean Clips"
+            onClick={onZoomIn}
+            disabled={zoomLevel >= 16}
+            aria-label="Zoom in timeline (+)"
+            className="p-1 rounded text-zinc-400 hover:text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white disabled:opacity-30 cursor-pointer"
+            title="Zoom In (+ or Mouse Wheel)"
           >
-            <Layers className="w-3 h-3" />
-            <span>BATCH</span>
+            <ZoomIn className="w-3.5 h-3.5" />
           </button>
-        )}
-
-        {/* Single cut export */}
-        <button
-          onClick={onExport}
-          disabled={isExporting}
-          className="flex items-center gap-1.5 px-3 py-1 rounded bg-cyan-600 hover:bg-cyan-500 text-zinc-950 font-bold text-[11px] transition cursor-pointer disabled:opacity-40"
-          title="Export Active Range (Enter)"
-        >
-          {isExporting ? (
-            <>
-              <Clock className="w-3 h-3 animate-spin" />
-              <span>EXPORTING...</span>
-            </>
-          ) : (
-            <>
-              <Download className="w-3 h-3" />
-              <span>CUT EXPORT</span>
-            </>
-          )}
-        </button>
+        </div>
       </div>
     </div>
   );

@@ -16,7 +16,19 @@ import {
   ContainerFormat,
   CutMode,
 } from "./types";
-import { AlertTriangle, FolderOpen, Play, X, Scissors, FileVideo } from "lucide-react";
+import {
+  AlertTriangle,
+  FolderOpen,
+  X,
+  Film,
+  Undo2,
+  Redo2,
+  FileCode,
+  Download,
+  Layers,
+  Zap,
+  Clock,
+} from "lucide-react";
 
 /**
  * Computes active speech intervals by inverting silent intervals with natural breath padding.
@@ -131,7 +143,7 @@ export const App: React.FC = () => {
 
   // Non-destructive Undo / Redo stacks for activeSegments edits
   const [undoStack, setUndoStack] = useState<[number, number][][]>([]);
-  const [, setRedoStack] = useState<[number, number][][]>([]);
+  const [redoStack, setRedoStack] = useState<[number, number][][]>([]);
 
   const [inPoint, setInPoint] = useState<number | null>(null);
   const [outPoint, setOutPoint] = useState<number | null>(null);
@@ -539,7 +551,7 @@ export const App: React.FC = () => {
     setStatusMessage(`SEEKED NEXT I-FRAME: ${target.toFixed(3)}s`);
   }, [keyframes, currentTime]);
 
-  // Slice active segment at playhead (Shortcut: X) with Undo support
+  // Slice active segment at playhead (Shortcut: X or Split button) with Undo support
   const handleSliceAtPlayhead = useCallback(() => {
     if (activeSegments.length === 0) return;
     const nextSegments: [number, number][] = [];
@@ -566,9 +578,9 @@ export const App: React.FC = () => {
         setInPoint(nextSegments[newSelectedIdx][0]);
         setOutPoint(nextSegments[newSelectedIdx][1]);
       }
-      setStatusMessage(`SLICED CLIP AT PLAYHEAD (${currentTime.toFixed(2)}s) -> ${nextSegments.length} CLIPS`);
+      setStatusMessage(`SPLIT CLIP AT PLAYHEAD (${currentTime.toFixed(2)}s) -> ${nextSegments.length} CLIPS`);
     } else {
-      setStatusMessage("PLAYHEAD MUST BE INSIDE AN ACTIVE CLIP TO SLICE (X)");
+      setStatusMessage("PLAYHEAD MUST BE INSIDE AN ACTIVE CLIP TO SPLIT (X)");
     }
   }, [activeSegments, currentTime, selectedClipIndex, pushUndoSnapshot]);
 
@@ -641,39 +653,24 @@ export const App: React.FC = () => {
     }
   }, [filePath, selectedTrackIndex, minSilenceDuration, duration, activeSegments, pushUndoSnapshot]);
 
-  // Toggle Cut Engine Mode (stream_copy -> smart_copy -> exact_frame)
-  const handleToggleCutMode = useCallback(() => {
-    setCutMode((prev) => {
-      const next: CutMode =
-        prev === "stream_copy"
-          ? "smart_copy"
-          : prev === "smart_copy"
-          ? "exact_frame"
-          : "stream_copy";
-      setStatusMessage(
-        next === "stream_copy"
-          ? "MODE: STREAM COPY (Instant zero-reencoding, snapped to GOP I-frames)"
-          : next === "smart_copy"
-          ? "MODE: SMART GOP (Micro-renders partial leading GOP + zero-reencode stream copy body)"
-          : "MODE: EXACT FRAME (Full segment ultra-fast re-encode)"
-      );
-      return next;
-    });
-  }, []);
-
-  // Select first active speech segment
+  // Recompute and restore all active speech segments from current silence intervals
   const handleStripSilence = useCallback(() => {
-    if (activeSegments.length > 0) {
-      const [start, end] = activeSegments[0];
+    if (duration <= 0) return;
+    const restoredSegments = computeActiveSegmentsWithPadding(silenceIntervals, duration, 0.06);
+    if (restoredSegments.length > 0) {
+      pushUndoSnapshot(activeSegments);
+      setActiveSegments(restoredSegments);
       setSelectedClipIndex(0);
-      setInPoint(start);
-      setOutPoint(end);
-      setCurrentTime(start);
-      setStatusMessage(`ACTIVE SEGMENT #1: ${start.toFixed(2)}s -> ${end.toFixed(2)}s`);
+      setInPoint(restoredSegments[0][0]);
+      setOutPoint(restoredSegments[0][1]);
+      setCurrentTime(restoredSegments[0][0]);
+      setStatusMessage(
+        `STRIPPED ${silenceIntervals.length} SILENCES -> ${restoredSegments.length} ACTIVE SPEECH CLIPS`
+      );
     } else {
       setStatusMessage("NO SILENT INTERVALS DETECTED");
     }
-  }, [activeSegments]);
+  }, [silenceIntervals, duration, activeSegments, pushUndoSnapshot]);
 
   // Jump to specific segment and bind it for active In/Out handle trimming
   const handleSelectSegment = useCallback((idx: number, start: number, end: number) => {
@@ -711,7 +708,7 @@ export const App: React.FC = () => {
         }
         return next;
       });
-      setStatusMessage(`REMOVED SEGMENT #${indexToRemove + 1} (CTRL+Z TO UNDO)`);
+      setStatusMessage(`REMOVED CLIP #${indexToRemove + 1} (CTRL+Z TO UNDO)`);
     },
     [activeSegments, selectedClipIndex, pushUndoSnapshot]
   );
@@ -907,19 +904,27 @@ export const App: React.FC = () => {
   });
 
   const fileNameOnly = filePath ? filePath.split(/[/\\]/).pop() : null;
+  const totalKeptSec = activeSegments.reduce(
+    (acc, [s, e]) => acc + Math.max(0, e - s),
+    0
+  );
+  const savedSec = Math.max(0, duration - totalKeptSec);
 
   return (
-    <div className="flex flex-col h-screen w-screen bg-zinc-950 text-zinc-300 select-none overflow-hidden font-sans">
+    <div className="flex flex-col h-screen w-screen bg-[#0c0c0e] text-zinc-200 select-none overflow-hidden font-sans antialiased">
       {/* Warning Bar if FFmpeg is missing */}
       {envStatus && !envStatus.ffmpeg_available && (
-        <div className="flex items-center justify-between px-3 py-1 bg-red-950/40 border-b border-red-900/60 text-red-400 text-xs font-mono">
+        <div className="flex items-center justify-between px-4 py-1.5 bg-zinc-900 border-b border-white/[0.12] text-zinc-200 text-xs font-mono">
           <div className="flex items-center gap-2">
-            <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-            <span>FFmpeg binaries not found. Expected in: <strong>{envStatus.internal_bin_dir}</strong></span>
+            <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-white" />
+            <span>
+              FFmpeg binaries not found. Expected in:{" "}
+              <strong>{envStatus.internal_bin_dir}</strong>
+            </span>
           </div>
           <button
             onClick={() => alert(`Target binary directory: ${envStatus.internal_bin_dir}`)}
-            className="flex items-center gap-1 px-2 py-0.5 bg-zinc-900 border border-zinc-700 rounded text-[10px] text-zinc-300 cursor-pointer"
+            className="flex items-center gap-1 px-2 py-0.5 bg-white text-black rounded text-[10px] font-medium cursor-pointer"
           >
             <FolderOpen className="w-3 h-3" />
             <span>Directory</span>
@@ -927,59 +932,215 @@ export const App: React.FC = () => {
         </div>
       )}
 
-      {/* Industrial Studio Header Bar */}
-      <header className="h-[30px] px-3 bg-zinc-900/95 border-b border-zinc-800 flex items-center justify-between font-mono text-xs shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="font-bold tracking-widest text-zinc-100 text-[11px]">SNIPFLOW</span>
-          <span className="text-zinc-600">/</span>
-          <span className="text-[10px] text-zinc-500 uppercase tracking-wider">v0.6.1</span>
-          {fileNameOnly && (
-            <>
-              <span className="text-zinc-700">|</span>
-              <span className="text-zinc-300 text-[11px] truncate max-w-md">{fileNameOnly}</span>
+      {/* Top Monochrome Studio Navigation Bar */}
+      <header className="h-12 px-4 bg-[#111114] border-b border-white/[0.06] flex items-center justify-between shrink-0">
+        {/* Left: Monochrome Logo, Brand, File Switcher & Undo/Redo */}
+        <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2">
+            <img src="/logo.svg" alt="SnipFlow Logo" className="w-6 h-6 rounded-md" />
+            <span className="font-semibold text-sm text-white tracking-tight">
+              SnipFlow
+            </span>
+            <span className="text-[10px] font-mono text-zinc-500 px-1.5 py-0.5 rounded bg-white/[0.04] border border-white/[0.06]">
+              v0.7.0
+            </span>
+          </div>
+
+          <div className="h-4 w-px bg-white/[0.08]" />
+
+          <button
+            onClick={handleOpenMediaDialog}
+            className="flex items-center gap-2 px-2.5 py-1 rounded-md bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-xs text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition cursor-pointer"
+            title="Open or switch video file (Ctrl+O)"
+          >
+            <Film className="w-3.5 h-3.5 text-zinc-400" />
+            <span className="truncate max-w-[200px]">
+              {fileNameOnly || "Open Video..."}
+            </span>
+            {fileNameOnly && (
+              <span className="text-[11px] text-zinc-500">Change</span>
+            )}
+          </button>
+
+          {/* Undo / Redo */}
+          <div className="flex items-center gap-0.5 ml-0.5">
+            <button
+              onClick={handleUndo}
+              disabled={undoStack.length === 0}
+              aria-label="Undo (Ctrl+Z)"
+              title={`Undo (Ctrl+Z) · ${undoStack.length} steps`}
+              className="p-1.5 rounded-md text-zinc-400 hover:text-white hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white disabled:opacity-30 transition cursor-pointer"
+            >
+              <Undo2 className="w-3.5 h-3.5" />
+            </button>
+            <button
+              onClick={handleRedo}
+              disabled={redoStack.length === 0}
+              aria-label="Redo (Ctrl+Y)"
+              title={`Redo (Ctrl+Y) · ${redoStack.length} steps`}
+              className="p-1.5 rounded-md text-zinc-400 hover:text-white hover:bg-white/[0.06] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white disabled:opacity-30 transition cursor-pointer"
+            >
+              <Redo2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        </div>
+
+        {/* Center: Segmented Tri-State Cut Engine Mode Control */}
+        <div className="flex items-center p-0.5 rounded-lg bg-[#09090b] border border-white/[0.08] text-xs">
+          {(
+            [
+              {
+                id: "smart_copy",
+                label: "Smart Cut",
+                desc: "Micro-renders partial leading GOP + zero-reencode stream copy body",
+              },
+              {
+                id: "stream_copy",
+                label: "Lossless",
+                desc: "Instant zero-reencoding (-c copy) snapped to GOP keyframes",
+              },
+              {
+                id: "exact_frame",
+                label: "Frame Exact",
+                desc: "Full segment ultra-fast re-encode",
+              },
+            ] as const
+          ).map((item) => {
+            const active = cutMode === item.id;
+            return (
               <button
-                onClick={handleOpenMediaDialog}
-                className="flex items-center gap-1 px-1.5 py-0.5 ml-1 rounded bg-zinc-850 hover:bg-zinc-800 border border-zinc-750 text-[10px] text-zinc-300 hover:text-cyan-300 transition cursor-pointer"
-                title="Open / Switch Video File (Ctrl+O)"
+                key={item.id}
+                onClick={() => {
+                  setCutMode(item.id);
+                  setStatusMessage(
+                    item.id === "stream_copy"
+                      ? "MODE: LOSSLESS STREAM COPY (Instant zero-reencoding, snapped to GOP I-frames)"
+                      : item.id === "smart_copy"
+                      ? "MODE: SMART CUT (Micro-renders partial leading GOP + zero-reencode stream copy body)"
+                      : "MODE: FRAME EXACT (Full segment ultra-fast re-encode)"
+                  );
+                }}
+                title={item.desc}
+                className={`px-3 py-1 rounded-md font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition cursor-pointer ${
+                  active
+                    ? "bg-white text-black shadow-sm"
+                    : "text-zinc-400 hover:text-zinc-200"
+                }`}
               >
-                <FileVideo className="w-2.5 h-2.5" />
-                <span>OPEN</span>
+                {item.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Right: Output Directory, Container Remux Format & Export Actions */}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={handleSelectOutputDir}
+            aria-label={
+              customOutputDir
+                ? `Custom export directory: ${customOutputDir}`
+                : "Set custom export directory"
+            }
+            title={
+              customOutputDir
+                ? `Output Directory: ${customOutputDir}`
+                : "Set Custom Export Directory"
+            }
+            className={`p-1.5 rounded-md border focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white transition cursor-pointer ${
+              customOutputDir
+                ? "bg-white text-black border-white"
+                : "bg-white/[0.04] hover:bg-white/[0.08] border-white/[0.08] text-zinc-300"
+            }`}
+          >
+            <FolderOpen className="w-3.5 h-3.5" />
+          </button>
+
+          <select
+            aria-label="Output container format"
+            value={containerFormat}
+            onChange={(e) => {
+              const fmt = e.target.value as ContainerFormat;
+              setContainerFormat(fmt);
+              setStatusMessage(
+                fmt === "auto"
+                  ? "CONTAINER FORMAT: AUTO (Preserve source container)"
+                  : `CONTAINER FORMAT: .${fmt.toUpperCase()} (Zero-reencode stream remux)`
+              );
+            }}
+            className="bg-white/[0.04] hover:bg-white/[0.08] text-zinc-200 border border-white/[0.08] rounded-md px-2.5 py-1 text-xs focus:outline-none focus-visible:ring-1 focus-visible:ring-white cursor-pointer"
+            title="Output Container Format (Original or lossless MP4/MKV/MOV remux)"
+          >
+            <option value="auto" className="bg-zinc-900">Format: Original</option>
+            <option value="mp4" className="bg-zinc-900">Format: MP4</option>
+            <option value="mkv" className="bg-zinc-900">Format: MKV</option>
+            <option value="mov" className="bg-zinc-900">Format: MOV</option>
+          </select>
+
+          <button
+            onClick={handleExportNleTimeline}
+            disabled={!filePath || isExporting}
+            className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-xs text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white disabled:opacity-40 transition cursor-pointer"
+            title="Export Non-Destructive NLE Timeline (.edl + .fcpxml) for DaVinci Resolve, Premiere Pro & Final Cut Pro"
+          >
+            <FileCode className="w-3.5 h-3.5 text-zinc-400" />
+            <span>NLE XML</span>
+          </button>
+
+          {activeSegments.length > 1 && (
+            <>
+              <button
+                onClick={handleSeamlessMerge}
+                disabled={!filePath || isExporting}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/[0.08] hover:bg-white/[0.14] border border-white/20 text-xs text-white font-medium focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white disabled:opacity-40 transition cursor-pointer"
+                title="Remove all silent pauses and merge into a single seamless continuous video"
+              >
+                <Zap className="w-3.5 h-3.5" />
+                <span>Merge ({activeSegments.length})</span>
+              </button>
+
+              <button
+                onClick={handleBatchExport}
+                disabled={!filePath || isExporting}
+                className="flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-xs text-zinc-200 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white disabled:opacity-40 transition cursor-pointer"
+                title="Batch Export All Active Clips as Separate Files"
+              >
+                <Layers className="w-3.5 h-3.5 text-zinc-400" />
+                <span>Batch</span>
               </button>
             </>
           )}
-        </div>
 
-        <div className="flex items-center gap-3 text-[10px] text-zinc-500 font-mono">
-          <span>ENGINE: RUST/FFMPEG</span>
-          <span>·</span>
-          <span
-            className={
-              cutMode === "stream_copy"
-                ? "text-cyan-400 font-semibold"
-                : cutMode === "smart_copy"
-                ? "text-emerald-400 font-semibold"
-                : "text-purple-400 font-semibold"
-            }
+          <button
+            onClick={handleExport}
+            disabled={!filePath || isExporting}
+            className="flex items-center gap-1.5 px-3.5 py-1 rounded-md bg-white hover:bg-zinc-200 text-black font-medium text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white disabled:opacity-40 transition shadow-sm cursor-pointer"
+            title="Export Active Selection (Enter)"
           >
-            MODE:{" "}
-            {cutMode === "stream_copy"
-              ? "STREAM COPY (PASSTHROUGH)"
-              : cutMode === "smart_copy"
-              ? "SMART GOP (HYBRID MICRO-RENDER)"
-              : "EXACT FRAME (FULL RENDER)"}
-          </span>
+            {isExporting ? (
+              <>
+                <Clock className="w-3.5 h-3.5 animate-spin" />
+                <span>Exporting...</span>
+              </>
+            ) : (
+              <>
+                <Download className="w-3.5 h-3.5" />
+                <span>Export Cut</span>
+              </>
+            )}
+          </button>
         </div>
       </header>
 
-      {/* Main Workspace Body */}
-      <main className="flex-1 flex flex-col p-2 gap-2 overflow-hidden min-h-0">
+      {/* Main Studio Workspace */}
+      <main className="flex-1 flex flex-col p-3 gap-3 overflow-hidden min-h-0">
         {!filePath ? (
           <div className="flex-1 flex items-center justify-center p-4">
             <DropZone onFileSelected={handleFileSelected} isLoading={isLoading} />
           </div>
         ) : (
           <>
-            {/* Monitor Viewport */}
+            {/* Video Preview Monitor */}
             <div className="flex-1 min-h-0 w-full flex items-center justify-center">
               {videoUrl ? (
                 <VideoPlayer
@@ -997,102 +1158,15 @@ export const App: React.FC = () => {
                   onToggleSkipSilencePreview={handleToggleSkipSilencePreview}
                 />
               ) : (
-                <div className="w-full h-full flex items-center justify-center bg-black rounded border border-zinc-850 font-mono text-xs text-zinc-600">
+                <div className="w-full h-full flex items-center justify-center bg-[#070709] rounded-xl border border-white/[0.06] font-mono text-xs text-zinc-500">
                   NO VIDEO SIGNAL
                 </div>
               )}
             </div>
 
-            {/* Timeline Canvas Section */}
-            <div className="w-full shrink-0">
-              <TimelineCanvas
-                duration={duration}
-                currentTime={currentTime}
-                inPoint={inPoint}
-                outPoint={outPoint}
-                keyframes={keyframes}
-                silenceIntervals={silenceIntervals}
-                peakHighlights={peakHighlights}
-                waveformPeaks={waveformPeaks}
-                isMagneticSnapEnabled={isMagneticSnapEnabled}
-                zoomLevel={zoomLevel}
-                onSeek={(t) => setCurrentTime(t)}
-                onChangeInPoint={handleUpdateInPoint}
-                onChangeOutPoint={handleUpdateOutPoint}
-                onTrimDragStart={() => pushUndoSnapshot(activeSegments)}
-                onWheelZoom={(dir) =>
-                  setZoomLevel((z) => (dir === "in" ? Math.min(16, z * 2) : Math.max(1, z / 2)))
-                }
-                onDoubleClickTime={handleDoubleClickTimeline}
-                onDragStart={() => setIsPlaying(false)}
-              />
-            </div>
-
-            {/* Active Segments Ribbon & Compression Analytics HUD */}
-            {activeSegments.length > 0 && (() => {
-              const totalKeptSec = activeSegments.reduce(
-                (acc, [s, e]) => acc + Math.max(0, e - s),
-                0
-              );
-              const savedSec = Math.max(0, duration - totalKeptSec);
-              const keptPct = duration > 0 ? Math.round((totalKeptSec / duration) * 100) : 100;
-
-              return (
-                <div className="w-full shrink-0 flex items-center justify-between gap-2 py-1 px-1.5 bg-zinc-950 border border-zinc-850/80 rounded font-mono text-[10px]">
-                  <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar">
-                    <div className="flex items-center gap-1 text-zinc-500 shrink-0 px-1">
-                      <Scissors className="w-3 h-3 text-zinc-500" />
-                      <span>CLIPS ({activeSegments.length}):</span>
-                    </div>
-                    {activeSegments.map(([s, e], idx) => {
-                      const clipDur = Math.max(0, e - s);
-                      const isCurrent = selectedClipIndex === idx;
-                      return (
-                        <div
-                          key={idx}
-                          className={`flex items-center gap-1 px-2 py-0.5 rounded border transition shrink-0 cursor-pointer ${
-                            isCurrent
-                              ? "bg-cyan-950/40 border-cyan-700 text-cyan-300"
-                              : "bg-zinc-900 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:bg-zinc-850"
-                          }`}
-                          onClick={() => handleSelectSegment(idx, s, e)}
-                          title={`Select Clip #${idx + 1} (${s.toFixed(2)}s - ${e.toFixed(2)}s) for trimming`}
-                        >
-                          <Play className="w-2.5 h-2.5 opacity-60" />
-                          <span>#{idx + 1}</span>
-                          <span className="text-zinc-500">{clipDur.toFixed(1)}s</span>
-                          <button
-                            onClick={(ev) => {
-                              ev.stopPropagation();
-                              handleRemoveSegment(idx);
-                            }}
-                            aria-label={`Exclude clip #${idx + 1} from export`}
-                            className="hover:text-rose-400 ml-0.5 text-zinc-600 cursor-pointer"
-                            title="Exclude clip from export (Ctrl+Z to Undo)"
-                          >
-                            <X className="w-2.5 h-2.5" />
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Triage Compression Analytics HUD */}
-                  <div className="flex items-center gap-2 shrink-0 px-2 py-0.5 bg-zinc-900/90 border border-zinc-800 rounded text-[10px]">
-                    <span className="text-emerald-400 font-semibold">
-                      KEPT: {totalKeptSec.toFixed(1)}s ({keptPct}%)
-                    </span>
-                    <span className="text-zinc-600">·</span>
-                    <span className="text-rose-400">
-                      STRIPPED: -{savedSec.toFixed(1)}s
-                    </span>
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* Compact Transport Toolbar */}
-            <div className="w-full shrink-0">
+            {/* Unified Monochrome Timeline & Editing Dock */}
+            <div className="rounded-xl bg-[#111115] border border-white/[0.06] flex flex-col overflow-hidden shrink-0">
+              {/* Editing & Silence Detection Control Strip */}
               <Toolbar
                 inPoint={inPoint}
                 outPoint={outPoint}
@@ -1102,33 +1176,18 @@ export const App: React.FC = () => {
                 noiseDb={noiseDb}
                 minSilenceDuration={minSilenceDuration}
                 zoomLevel={zoomLevel}
-                isExporting={isExporting}
                 isCalibrating={isCalibrating}
-                lastExportElapsedMs={lastExportElapsedMs}
                 silenceCount={silenceIntervals.length}
                 audioTracks={audioTracks}
                 selectedTrackIndex={selectedTrackIndex}
                 highlightCount={peakHighlights.length}
-                activeSegmentCount={activeSegments.length}
-                undoCount={undoStack.length}
-                customOutputDir={customOutputDir}
-                cutMode={cutMode}
-                containerFormat={containerFormat}
-                onChangeContainerFormat={(fmt) => {
-                  setContainerFormat(fmt);
-                  setStatusMessage(
-                    fmt === "auto"
-                      ? "CONTAINER FORMAT: AUTO (Preserve source container)"
-                      : `CONTAINER FORMAT: .${fmt.toUpperCase()} (Zero-reencode stream remux)`
-                  );
-                }}
-                onToggleCutMode={handleToggleCutMode}
+                totalKeptSec={totalKeptSec}
+                savedSec={savedSec}
                 onAutoCalibrateNoiseFloor={handleAutoCalibrateNoiseFloor}
                 onSelectTrack={handleSelectTrack}
                 onToggleMagneticSnap={() => setIsMagneticSnapEnabled(!isMagneticSnapEnabled)}
                 onNoiseDbChange={handleNoiseDbChange}
                 onMinSilenceDurationChange={handleMinSilenceDurationChange}
-                onUndo={handleUndo}
                 onZoomIn={() => setZoomLevel((z) => Math.min(16, z * 2))}
                 onZoomOut={() => setZoomLevel((z) => Math.max(1, z / 2))}
                 onMarkIn={() => {
@@ -1145,35 +1204,149 @@ export const App: React.FC = () => {
                     handleUpdateInPoint(Math.max(0, currentTime - 5.0));
                   }
                 }}
+                onSliceAtPlayhead={handleSliceAtPlayhead}
                 onSnapInToKeyframe={handleSnapInToKeyframe}
                 onStripSilence={handleStripSilence}
                 onNextHighlight={handleNextHighlight}
                 onBuildHighlightReel={handleBuildHighlightReel}
-                onSelectOutputDir={handleSelectOutputDir}
-                onExportNleTimeline={handleExportNleTimeline}
-                onExport={handleExport}
-                onBatchExport={handleBatchExport}
-                onSeamlessMerge={handleSeamlessMerge}
               />
+
+              {/* High-Density 1200-Bin Monochrome Timeline Canvas */}
+              <TimelineCanvas
+                duration={duration}
+                currentTime={currentTime}
+                inPoint={inPoint}
+                outPoint={outPoint}
+                keyframes={keyframes}
+                silenceIntervals={silenceIntervals}
+                activeSegments={activeSegments}
+                selectedClipIndex={selectedClipIndex}
+                peakHighlights={peakHighlights}
+                waveformPeaks={waveformPeaks}
+                isMagneticSnapEnabled={isMagneticSnapEnabled}
+                zoomLevel={zoomLevel}
+                onSeek={(t) => setCurrentTime(t)}
+                onChangeInPoint={handleUpdateInPoint}
+                onChangeOutPoint={handleUpdateOutPoint}
+                onTrimDragStart={() => pushUndoSnapshot(activeSegments)}
+                onWheelZoom={(dir) =>
+                  setZoomLevel((z) => (dir === "in" ? Math.min(16, z * 2) : Math.max(1, z / 2)))
+                }
+                onDoubleClickTime={handleDoubleClickTimeline}
+                onDragStart={() => setIsPlaying(false)}
+              />
+
+              {/* Active Clips Ribbon */}
+              {activeSegments.length > 0 && (
+                <div className="h-10 px-3.5 bg-[#111115] border-t border-white/[0.06] flex items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar">
+                    <span className="text-zinc-500 mr-1 flex items-center gap-1 shrink-0">
+                      <Layers className="w-3.5 h-3.5" />
+                      <span>Clips ({activeSegments.length})</span>
+                    </span>
+                    {activeSegments.map(([s, e], idx) => {
+                      const clipDur = Math.max(0, e - s);
+                      const isCurrent = selectedClipIndex === idx;
+                      return (
+                        <div
+                          key={idx}
+                          onClick={() => handleSelectSegment(idx, s, e)}
+                          title={`Select Clip #${idx + 1} (${s.toFixed(2)}s - ${e.toFixed(2)}s) for trimming`}
+                          className={`flex items-center gap-2 px-2.5 py-1 rounded-md border text-xs transition cursor-pointer shrink-0 ${
+                            isCurrent
+                              ? "bg-white text-black border-white font-medium"
+                              : "bg-white/[0.02] border-white/[0.08] text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.05]"
+                          }`}
+                        >
+                          <span>Clip #{idx + 1}</span>
+                          <span
+                            className={`font-mono text-[11px] tabular-nums ${
+                              isCurrent ? "text-zinc-700" : "text-zinc-500"
+                            }`}
+                          >
+                            {clipDur.toFixed(1)}s
+                          </span>
+                          <button
+                            onClick={(ev) => {
+                              ev.stopPropagation();
+                              handleRemoveSegment(idx);
+                            }}
+                            aria-label={`Remove clip #${idx + 1}`}
+                            title="Exclude clip from export (Ctrl+Z to Undo)"
+                            className={`transition cursor-pointer ${
+                              isCurrent
+                                ? "text-zinc-600 hover:text-black"
+                                : "text-zinc-500 hover:text-white"
+                            }`}
+                          >
+                            <X className="w-3 h-3" />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {lastExportElapsedMs !== null && (
+                    <span className="font-mono text-[11px] text-white bg-white/[0.06] border border-white/[0.12] px-2 py-0.5 rounded shrink-0">
+                      Last Export: {lastExportElapsedMs.toFixed(1)}ms
+                    </span>
+                  )}
+                </div>
+              )}
             </div>
           </>
         )}
       </main>
 
-      {/* Industrial Status Footer */}
-      <footer className="h-[22px] px-3 bg-zinc-950 border-t border-zinc-850 flex items-center justify-between font-mono text-[10px] text-zinc-500 shrink-0">
+      {/* Monochrome Status Footer */}
+      <footer className="h-6 px-4 bg-[#09090b] border-t border-white/[0.06] flex items-center justify-between font-mono text-[10px] text-zinc-500 shrink-0">
         <div className="truncate text-zinc-400">
           <span>&gt; {statusMessage}</span>
         </div>
 
         <div className="flex items-center gap-2.5 text-zinc-500 shrink-0">
-          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">SPACE</kbd> PLAY</span>
-          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">J/K/L</kbd> SHUTTLE</span>
-          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">S</kbd> LIVE SKIP</span>
-          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">X</kbd> SLICE</span>
-          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">CTRL+Z</kbd> UNDO</span>
-          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">CTRL+O</kbd> OPEN</span>
-          <span><kbd className="px-1 py-0.2 rounded bg-zinc-900 border border-zinc-800 text-zinc-300">ENTER</kbd> EXPORT</span>
+          <span>
+            <kbd className="px-1 py-0.2 rounded bg-white/[0.05] border border-white/[0.08] text-zinc-300">
+              SPACE
+            </kbd>{" "}
+            Play
+          </span>
+          <span>
+            <kbd className="px-1 py-0.2 rounded bg-white/[0.05] border border-white/[0.08] text-zinc-300">
+              J/K/L
+            </kbd>{" "}
+            Shuttle
+          </span>
+          <span>
+            <kbd className="px-1 py-0.2 rounded bg-white/[0.05] border border-white/[0.08] text-zinc-300">
+              S
+            </kbd>{" "}
+            Skip Silence
+          </span>
+          <span>
+            <kbd className="px-1 py-0.2 rounded bg-white/[0.05] border border-white/[0.08] text-zinc-300">
+              X
+            </kbd>{" "}
+            Split
+          </span>
+          <span>
+            <kbd className="px-1 py-0.2 rounded bg-white/[0.05] border border-white/[0.08] text-zinc-300">
+              CTRL+Z/Y
+            </kbd>{" "}
+            Undo/Redo
+          </span>
+          <span>
+            <kbd className="px-1 py-0.2 rounded bg-white/[0.05] border border-white/[0.08] text-zinc-300">
+              CTRL+O
+            </kbd>{" "}
+            Open
+          </span>
+          <span>
+            <kbd className="px-1 py-0.2 rounded bg-white/[0.05] border border-white/[0.08] text-zinc-300">
+              ENTER
+            </kbd>{" "}
+            Export
+          </span>
         </div>
       </footer>
     </div>

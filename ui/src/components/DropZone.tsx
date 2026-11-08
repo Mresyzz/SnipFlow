@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Loader2, Crosshair, FolderOpen } from "lucide-react";
+import { Loader2, FolderOpen } from "lucide-react";
 
 interface DropZoneProps {
   onFileSelected: (filePath: string, fileBlobUrl?: string) => void;
@@ -60,10 +60,10 @@ export const DropZone: React.FC<DropZoneProps> = ({ onFileSelected, isLoading })
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
-      className={`relative w-full h-full flex flex-col items-center justify-center rounded bg-zinc-950 border transition-all cursor-pointer select-none ${
+      className={`relative w-full max-w-xl py-16 px-8 flex flex-col items-center justify-center rounded-2xl border transition-all cursor-pointer select-none ${
         isDragOver
-          ? "border-cyan-500 bg-cyan-950/10"
-          : "border-zinc-800/80 hover:border-zinc-700 bg-zinc-950/80"
+          ? "border-white bg-white/[0.06]"
+          : "border-white/[0.08] hover:border-white/[0.18] bg-[#111114]"
       }`}
     >
       <input
@@ -75,39 +75,36 @@ export const DropZone: React.FC<DropZoneProps> = ({ onFileSelected, isLoading })
       />
 
       {isLoading ? (
-        <div className="flex flex-col items-center gap-3 text-zinc-300 pointer-events-none">
-          <Loader2 className="w-8 h-8 text-cyan-400 animate-spin" />
-          <div className="text-center font-mono">
-            <p className="text-xs uppercase tracking-wider text-zinc-200">Demuxing Stream Metadata...</p>
-            <p className="text-[11px] text-zinc-500 mt-1">Indexing I-frames & scanning silence intervals</p>
+        <div className="flex flex-col items-center gap-3 text-zinc-200 pointer-events-none">
+          <Loader2 className="w-8 h-8 text-white animate-spin" />
+          <div className="text-center">
+            <p className="text-sm font-medium text-white">Demuxing Stream Metadata...</p>
+            <p className="text-xs text-zinc-500 mt-1 font-mono">
+              Indexing GOP keyframes, audio waveform & silence intervals
+            </p>
           </div>
         </div>
       ) : (
         <div className="flex flex-col items-center gap-4 text-center px-6 pointer-events-none">
-          {/* Studio Monitor Standby Reticle */}
-          <div className="relative w-20 h-20 rounded border border-zinc-800 bg-zinc-900/60 flex items-center justify-center">
-            <Crosshair className={`w-8 h-8 ${isDragOver ? "text-cyan-400 animate-pulse" : "text-zinc-600"}`} />
-            <div className="absolute top-1 left-1.5 text-[9px] font-mono text-zinc-600">SRC</div>
-            <div className="absolute bottom-1 right-1.5 text-[9px] font-mono text-zinc-600">RAW</div>
+          <div className="w-14 h-14 rounded-2xl bg-white/[0.04] border border-white/[0.08] flex items-center justify-center shadow-inner">
+            <img src="/logo.svg" alt="SnipFlow" className="w-8 h-8 rounded-md" />
           </div>
 
           <div>
-            <h3 className="text-sm font-semibold tracking-wide uppercase font-mono text-zinc-200">
-              No Media Loaded
-            </h3>
-            <p className="text-xs font-mono text-zinc-500 mt-1">
-              Drop video asset or browse local filesystem
+            <h2 className="text-sm font-medium text-zinc-100">
+              Drop a video file here, or click to browse
+            </h2>
+            <p className="text-xs text-zinc-500 mt-1">
+              Supports MP4, MOV, MKV, and WebM with instant lossless stream copy
             </p>
           </div>
 
-          <div className="flex items-center gap-2 mt-2">
-            <span className="flex items-center gap-1.5 px-3 py-1 bg-zinc-900 hover:bg-zinc-850 text-zinc-300 text-xs font-mono rounded border border-zinc-750 transition shadow-sm">
-              <FolderOpen className="w-3.5 h-3.5 text-zinc-400" />
-              <span>Select File</span>
-            </span>
-          </div>
+          <span className="mt-1 inline-flex items-center gap-2 px-4 py-1.5 rounded-lg bg-white text-black text-xs font-medium shadow-sm">
+            <FolderOpen className="w-3.5 h-3.5" />
+            <span>Select Video File</span>
+          </span>
 
-          <div className="flex items-center gap-2 mt-4 text-[10px] font-mono text-zinc-600">
+          <div className="flex items-center gap-2 mt-2 text-[11px] font-mono text-zinc-500">
             <span>MP4 / MKV / MOV / WEBM</span>
             <span>·</span>
             <span>H.264 / HEVC / AV1 / PRORES</span>
