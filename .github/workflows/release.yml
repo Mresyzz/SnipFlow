@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag version to release (e.g. v0.3.0)'
+        required: false
+        default: ''
 
 permissions:
   contents: write
@@ -12,6 +18,9 @@ jobs:
   build-binaries:
     name: Build (${{ matrix.target }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.tag != '' && github.event.inputs.tag || github.ref_name }}
     strategy:
       fail-fast: false
       matrix:
@@ -28,8 +37,8 @@ jobs:
             archive_ext: tar.gz
             bin_name: snipflow
 
-          # macOS Intel 64-bit (Cross-compiled on macos-latest runner)
-          - os: macos-latest
+          # macOS Intel 64-bit (Native runner on Intel hardware)
+          - os: macos-13
             target: x86_64-apple-darwin
             archive_ext: tar.gz
             bin_name: snipflow
@@ -78,12 +87,12 @@ jobs:
       - name: Strip debug symbols (Unix)
         if: runner.os != 'Windows'
         run: |
-          strip "target/${{ matrix.target }}/release/${{ matrix.bin_name }}"
+          strip "target/${{ matrix.target }}/release/${{ matrix.bin_name }}" || true
 
       - name: Prepare package directory
         shell: bash
         run: |
-          PKG_DIR="snipflow-${{ github.ref_name }}-${{ matrix.target }}"
+          PKG_DIR="snipflow-${RELEASE_TAG}-${{ matrix.target }}"
           mkdir -p "$PKG_DIR"
           cp "target/${{ matrix.target }}/release/${{ matrix.bin_name }}" "$PKG_DIR/"
           cp README.md "$PKG_DIR/"
@@ -93,7 +102,7 @@ jobs:
         if: matrix.target == 'x86_64-pc-windows-msvc'
         shell: pwsh
         run: |
-          $PkgDir = "snipflow-${{ github.ref_name }}-${{ matrix.target }}"
+          $PkgDir = "snipflow-${env:RELEASE_TAG}-${{ matrix.target }}"
           Write-Host "Downloading standalone FFmpeg & FFprobe for Windows bundle..."
           $FfmpegZip = "$env:TEMP\ffmpeg-win64.zip"
           try {
@@ -113,7 +122,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $PkgDir = "snipflow-${{ github.ref_name }}-${{ matrix.target }}"
+          $PkgDir = "snipflow-${env:RELEASE_TAG}-${{ matrix.target }}"
           $ArchiveName = "$PkgDir.zip"
           Compress-Archive -Path "$PkgDir\*" -DestinationPath $ArchiveName -CompressionLevel Optimal
           $Hash = (Get-FileHash -Path $ArchiveName -Algorithm SHA256).Hash.ToLower()
@@ -123,7 +132,7 @@ jobs:
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          PKG_DIR="snipflow-${{ github.ref_name }}-${{ matrix.target }}"
+          PKG_DIR="snipflow-${RELEASE_TAG}-${{ matrix.target }}"
           ARCHIVE_NAME="${PKG_DIR}.tar.gz"
           tar -czvf "$ARCHIVE_NAME" "$PKG_DIR"
           if command -v sha256sum &> /dev/null; then
@@ -146,6 +155,9 @@ jobs:
     name: Publish GitHub Release
     needs: [build-binaries]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      RELEASE_TAG: ${{ github.event.inputs.tag != '' && github.event.inputs.tag || github.ref_name }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -167,6 +179,7 @@ jobs:
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.RELEASE_TAG }}
           files: |
             dist/*.zip
             dist/*.tar.gz
